@@ -1,52 +1,68 @@
 # Google Maps Scraper
-Scraper of Google Maps reviews.
-The code allows to extract the **most recent** reviews starting from the url of a specific Point Of Interest (POI) in Google Maps.
-An additional extension helps to monitor and incrementally store the reviews in a MongoDB instance.
 
-## Installation
-Follow these steps to use the scraper:
-- Download latest version of Chromedrive from [here](https://chromedriver.storage.googleapis.com/index.html).
-- Install Python packages from requirements file, either using pip, conda or virtualenv:
+Scraper de reseñas de Google Maps que permite extraer las reseñas **más recientes** a partir de la URL de un Punto de Interés (POI) específico en Google Maps. Una extensión adicional ayuda a monitorear y almacenar incrementalmente las reseñas en una instancia de MongoDB.
 
-        conda create --name scraping python=3.9 --file requirements.txt
+## Instalación
 
-**Note**: Python >= 3.9 is required.
+Sigue estos pasos para usar el scraper:
 
-## Basic Usage
-The scraper.py script needs two main parameters as input:
-- `--i`: input file name, containing a list of urls that point to Google Maps place reviews (default: _urls.txt_)
-- `--o`: output file name, which will be created in the `data` folder (default: output.csv)
-- `--N`: number of reviews to retrieve, starting from the most recent (default: 100)
+1. Descarga la última versión de Chromedriver desde [aquí](https://chromedriver.chromium.org/).
+2. Instala los paquetes de Python desde el archivo de requisitos, ya sea usando pip, conda o virtualenv:
 
-Example:
+```bash
+conda create --name scraping python=3.9 --file requirements.txt
+```
 
-  `python scraper.py --N 50`
+**Nota**: Se requiere Python >= 3.9.
 
-generates a csv file containing last 50 reviews of places present in _urls.txt_
+## Uso Básico
 
-Additionally, other parameters can be provided:
-- `--place`: boolean value that allows to scrape POI metadata instead of reviews (default: false)
-- `--debug`: boolean value that allows to run the browser using the graphical interface (default: false)
-- `--source`: boolean value that allows to store source URL as additional field in CSV (default: false)
-- `--sort_by`: string value among most_relevant, newest, highest_rating or lowest_rating (default: newest), developed by @quaesito and that allows to change sorting behavior of reviews
+El script `scraper.py` necesita dos parámetros principales como entrada:
 
-For a basic description of logic and approach about this software development, have a look at the [Medium post](https://medium.com/data-science/scraping-google-maps-reviews-in-python-2b153c655fc2)
+- `--i`: nombre del archivo de entrada, que contiene una lista de URL que apuntan a reseñas de lugares de Google Maps (por defecto: *urls.txt*).
+- `--o`: nombre del archivo de salida, que se creará en la carpeta `data` (por defecto: *output.csv*).
+- `--N`: número de reseñas a recuperar, empezando por las más recientes (por defecto: 100).
 
-## Monitoring functionality
-The monitor.py script can be used to have an incremental scraper and override the limitation about the number of reviews that can be retrieved.
-The only additional requirement is to install MongoDB on your laptop: you can find a detailed guide on the [official site](https://docs.mongodb.com/manual/installation/)
+### Ejemplo
 
-The script takes two input:
-- `--i`: same as monitor.py script
-- `--from-date`: string date in the format YYYY-MM-DD, gives the minimum date that the scraper tries to obtain
+```bash
+python scraper.py --N 50
+```
 
-The main idea is to **periodically** run the script to obtain latest reviews: the scraper stores them in MongoDB up to get either the latest review of previous run or the day indicated in the input parameter.
+Genera un archivo CSV que contiene las últimas 50 reseñas de los lugares presentes en *urls.txt*.
 
-Take a look to this [Medium post](https://medium.com/@mattiagasparini2/monitoring-of-google-maps-reviews-29e5d35f9d17) to have more details about the idea behind this feature.
+### Parámetros Adicionales
 
-## Notes
-Url must be provided as expected, you can check the example file urls.txt to have an idea of what is a correct url.
-If you want to generate the correct url:
-1. Go to Google Maps and look for a specific place;
-2. Click on the number of reviews in the parenthesis;
-3. Save the url that is generated from previous interaction.
+Adicionalmente, se pueden proporcionar otros parámetros:
+
+- `--place`: valor booleano que permite extraer metadatos del POI en lugar de reseñas (por defecto: false).
+- `--debug`: valor booleano que permite ejecutar el navegador usando la interfaz gráfica (por defecto: false).
+- `--source`: valor booleano que permite almacenar la URL de origen como un campo adicional en el CSV (por defecto: false).
+- `--sort_by`: valor de cadena entre `most_relevant`, `newest`, `highest_rating` o `lowest_rating` (por defecto: `newest`), desarrollado por @quaesito y que permite cambiar el comportamiento de ordenación de las reseñas.
+
+Para una descripción básica de la lógica y el enfoque de este desarrollo de software, echa un vistazo al [artículo de Medium](enlace-al-articulo).
+
+## Funcionalidad de Monitoreo
+
+El script `monitor.py` se puede usar para tener un scraper incremental y anular la limitación sobre el número de reseñas que se pueden recuperar. El único requisito adicional es instalar MongoDB en tu computadora portátil: puedes encontrar una guía detallada en el [sitio oficial](https://www.mongodb.com/docs/manual/installation/).
+
+El script toma dos entradas:
+
+- `--i`: igual que el script `scraper.py`.
+- `--from-date`: fecha de cadena en el formato AAAA-MM-DD, que indica la fecha mínima que el scraper intenta obtener.
+
+La idea principal es ejecutar el script **periódicamente** para obtener las últimas reseñas: el scraper las almacena en MongoDB hasta que obtiene la última reseña de la ejecución anterior o el día indicado en el parámetro de entrada.
+
+Echa un vistazo a [este artículo de Medium](enlace-al-articulo) para obtener más detalles sobre la idea detrás de esta característica.
+
+## Notas
+
+La URL debe proporcionarse como se espera; puedes revisar el archivo de ejemplo `urls.txt` para tener una idea de lo que es una URL correcta.
+
+### Cómo generar la URL correcta
+
+Si quieres generar la URL correcta:
+
+1. Ve a Google Maps y busca un lugar específico.
+2. Haz clic en el número de reseñas entre paréntesis.
+3. Guarda la URL que se genera a partir de la interacción anterior.

@@ -4,7 +4,7 @@ import logging
 import re
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -51,29 +51,29 @@ class GoogleMapsScraper:
 
         wait = WebDriverWait(self.driver, MAX_WAIT)
 
-        # open dropdown menu
+        # abrir menú desplegable
         clicked = False
         tries = 0
         while not clicked and tries < MAX_RETRY:
             try:
-                menu_bt = wait.until(EC.element_to_be_clickable((By.XPATH, '//button[@data-value=\'Sort\']')))
+                menu_bt = wait.until(EC.element_to_be_clickable((By.XPATH, '//button[contains(@aria-label, \'Ordenar\')]')))
                 menu_bt.click()
 
                 clicked = True
                 time.sleep(3)
             except Exception as e:
                 tries += 1
-                self.logger.warn('Failed to click sorting button')
+                self.logger.warning('No se pudo hacer clic en el botón de ordenar')
 
-            # failed to open the dropdown
+            # no se pudo abrir el menú desplegable
             if tries == MAX_RETRY:
                 return -1
 
-        #  element of the list specified according to ind
+        # elemento de la lista especificado según ind
         recent_rating_bt = self.driver.find_elements(By.XPATH, '//div[@role=\'menuitemradio\']')[ind]
         recent_rating_bt.click()
 
-        # wait to load review (ajax call)
+        # esperar a que se cargue la reseña (llamada ajax)
         time.sleep(5)
 
         return 0
@@ -99,13 +99,13 @@ class GoogleMapsScraper:
                 self.driver = self.__get_driver()
                 self.driver.get(search_point_url)
 
-            # scroll to load all (20) places into the page
+            # desplazarse para cargar los 20 lugares en la página
             scrollable_div = self.driver.find_element(By.CSS_SELECTOR,
-                "div.m6QErb.DxyBCb.kA9KIf.dS8AEf.ecceSd > div[aria-label*='Results for']")
+                "div.m6QErb.DxyBCb.kA9KIf.dS8AEf.ecceSd > div[aria-label*='Resultados para']")
             for i in range(10):
                 self.driver.execute_script('arguments[0].scrollTop = arguments[0].scrollHeight', scrollable_div)
 
-            # Get places names and href
+            # Obtener nombres de lugares y href
             time.sleep(2)
             response = BeautifulSoup(self.driver.page_source, 'html.parser')
             div_places = response.select('div[jsaction] > a[href]')
@@ -119,7 +119,7 @@ class GoogleMapsScraper:
 
                 df_places = df_places.append(place_info, ignore_index=True)
 
-            # TODO: implement click to handle > 20 places
+            # TODO: implementar clic para manejar > 20 lugares
 
         df_places = df_places[['search_point_url', 'href', 'name']]
         df_places.to_csv('output/places_wax.csv', index=False)
@@ -128,18 +128,18 @@ class GoogleMapsScraper:
 
     def get_reviews(self, offset):
 
-        # scroll to load reviews
+        # desplazarse para cargar reseñas
         self.__scroll()
 
-        # wait for other reviews to load (ajax)
+        # esperar a que se carguen otras reseñas (ajax)
         time.sleep(4)
 
-        # expand review text
+        # expandir texto de la reseña
         self.__expand_reviews()
 
-        # parse reviews
+        # analizar reseñas
         response = BeautifulSoup(self.driver.page_source, 'html.parser')
-        # TODO: Subject to changes
+        # TODO: Sujeto a cambios
         rblock = response.find_all('div', class_='jftiEf fontBodyMedium')
         parsed_reviews = []
         for index, review in enumerate(rblock):
@@ -147,20 +147,20 @@ class GoogleMapsScraper:
                 r = self.__parse(review)
                 parsed_reviews.append(r)
 
-                # logging to std out
+                # registro en la salida estándar
                 print(r)
 
         return parsed_reviews
 
 
 
-    # need to use different url wrt reviews one to have all info
+    # necesita usar una URL diferente a la de las reseñas para tener toda la información
     def get_account(self, url):
 
         self.driver.get(url)
         self.__click_on_cookie_agreement()
 
-        # ajax call also for this section
+        # llamada ajax también para esta sección
         time.sleep(2)
 
         resp = BeautifulSoup(self.driver.page_source, 'html.parser')
@@ -173,33 +173,40 @@ class GoogleMapsScraper:
     def __parse(self, review):
 
         item = {}
+        retrieval_date = datetime.now()
 
         try:
-            # TODO: Subject to changes
+            # TODO: Sujeto a cambios
             id_review = review['data-review-id']
         except Exception as e:
             id_review = None
 
         try:
-            # TODO: Subject to changes
+            # TODO: Sujeto a cambios
             username = review['aria-label']
         except Exception as e:
             username = None
 
         try:
-            # TODO: Subject to changes
+            # TODO: Sujeto a cambios
             review_text = self.__filter_string(review.find('span', class_='wiI7pd').text)
         except Exception as e:
             review_text = None
 
         try:
-            # TODO: Subject to changes
-            rating = float(review.find('span', class_='kvMYJc')['aria-label'].split(' ')[0])
+            # Usar regex para encontrar el primer número en el aria-label
+            aria_label = review.find('span', class_='kvMYJc')['aria-label']
+            rating_match = re.search(r'(\d+)', aria_label)
+            if rating_match:
+                rating = float(rating_match.group(1))
+            else:
+                rating = None
+
         except Exception as e:
             rating = None
 
         try:
-            # TODO: Subject to changes
+            # TODO: Sujeto a cambios
             relative_date = review.find('span', class_='rsqaWe').text
         except Exception as e:
             relative_date = None
@@ -217,21 +224,57 @@ class GoogleMapsScraper:
         item['id_review'] = id_review
         item['caption'] = review_text
 
-        # depends on language, which depends on geolocation defined by Google Maps
-        # custom mapping to transform into date should be implemented
+        # depende del idioma, que depende de la geolocalización definida por Google Maps
+        # se debe implementar un mapeo personalizado para transformarlo en fecha
         item['relative_date'] = relative_date
+        item['review_date'] = self.__calculate_review_date(relative_date, retrieval_date)
 
-        # store datetime of scraping and apply further processing to calculate
-        # correct date as retrieval_date - time(relative_date)
-        item['retrieval_date'] = datetime.now()
+        # almacenar la fecha y hora del raspado y aplicar un procesamiento adicional para calcular
+        # la fecha correcta como retrieval_date - time(relative_date)
+        item['retrieval_date'] = retrieval_date
         item['rating'] = rating
         item['username'] = username
         item['n_review_user'] = n_reviews
-        #item['n_photo_user'] = n_photos  ## not available anymore
+        #item['n_photo_user'] = n_photos  ## ya no está disponible
         item['url_user'] = user_url
 
         return item
 
+    def __calculate_review_date(self, relative_date_str, retrieval_date):
+        """Calcula la fecha de la reseña restando la duración relativa de la fecha de recuperación."""
+        try:
+            # Ignorar la palabra "Editado" si está presente
+            relative_date_str = relative_date_str.replace("Editado ", "").strip()
+            
+            # Buscar el número o la palabra "un"/"una"
+            match = re.search(r'(\d+)', relative_date_str)
+            if match:
+                value = int(match.group(1))
+            elif "un" in relative_date_str.lower() or "una" in relative_date_str.lower():
+                value = 1
+            else:
+                return retrieval_date # Devolver la fecha de recuperación si no se encuentra número ni "un"
+
+            relative_date_str_lower = relative_date_str.lower()
+
+            if "segundo" in relative_date_str_lower:
+                return retrieval_date - timedelta(seconds=value)
+            elif "minuto" in relative_date_str_lower:
+                return retrieval_date - timedelta(minutes=value)
+            elif "hora" in relative_date_str_lower:
+                return retrieval_date - timedelta(hours=value)
+            elif "día" in relative_date_str_lower:
+                return retrieval_date - timedelta(days=value)
+            elif "semana" in relative_date_str_lower:
+                return retrieval_date - timedelta(weeks=value)
+            elif "mes" in relative_date_str_lower:
+                return retrieval_date - timedelta(days=value * 30)
+            elif "año" in relative_date_str_lower:
+                return retrieval_date - timedelta(days=value * 365)
+            else:
+                return retrieval_date
+        except (ValueError, IndexError):
+            return retrieval_date
 
     def __parse_place(self, response, url):
 
@@ -303,7 +346,7 @@ class GoogleMapsScraper:
 
 
     def _gen_search_points_from_square(self, keyword_list=None):
-        # TODO: Generate search points from corners of square
+        # TODO: Generar puntos de búsqueda desde las esquinas del cuadrado
 
         keyword_list = [] if keyword_list is None else keyword_list
 
@@ -326,38 +369,38 @@ class GoogleMapsScraper:
         return search_urls
 
 
-    # expand review description
+    # expandir la descripción de la reseña
     def __expand_reviews(self):
-        # use XPath to load complete reviews
-        # TODO: Subject to changes
+        # usar XPath para cargar reseñas completas
+        # TODO: Sujeto a cambios
         buttons = self.driver.find_elements(By.CSS_SELECTOR,'button.w8nwRe.kyuRq')
         for button in buttons:
             self.driver.execute_script("arguments[0].click();", button)
 
 
     def __scroll(self):
-        # TODO: Subject to changes
+        # TODO: Sujeto a cambios
         scrollable_div = self.driver.find_element(By.CSS_SELECTOR,'div.m6QErb.DxyBCb.kA9KIf.dS8AEf')
         self.driver.execute_script('arguments[0].scrollTop = arguments[0].scrollHeight', scrollable_div)
         #self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
 
 
     def __get_logger(self):
-        # create logger
+        # crear logger
         logger = logging.getLogger('googlemaps-scraper')
         logger.setLevel(logging.DEBUG)
 
-        # create console handler and set level to debug
+        # crear manejador de consola y establecer el nivel en debug
         fh = logging.FileHandler('gm-scraper.log')
         fh.setLevel(logging.DEBUG)
 
-        # create formatter
+        # crear formateador
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
-        # add formatter to ch
+        # agregar formateador a ch
         fh.setFormatter(formatter)
 
-        # add ch to logger
+        # agregar ch a logger
         logger.addHandler(fh)
 
         return logger
@@ -373,30 +416,30 @@ class GoogleMapsScraper:
 
         options.add_argument("--disable-notifications")
         #options.add_argument("--lang=en-GB")
-        options.add_argument("--accept-lang=en-GB")
+        options.add_argument("--accept-lang=es")
         input_driver = webdriver.Chrome(service=Service(), options=options)
 
-         # click on google agree button so we can continue (not needed anymore)
-         # EC.element_to_be_clickable((By.XPATH, '//span[contains(text(), "I agree")]')))
+         # hacer clic en el botón de aceptar de Google para poder continuar (ya no es necesario)
+         # EC.element_to_be_clickable((By.XPATH, '//span[contains(text(), "Acepto")]')))
         input_driver.get(GM_WEBPAGE)
 
         return input_driver
 
-    # cookies agreement click
+    # clic en el acuerdo de cookies
     def __click_on_cookie_agreement(self):
         try:
             agree = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, '//span[contains(text(), "Reject all")]')))
+                EC.element_to_be_clickable((By.XPATH, '//span[contains(text(), "Rechazar todo")]')))
             agree.click()
 
-            # back to the main page
+            # volver a la página principal
             # self.driver.switch_to_default_content()
 
             return True
         except:
             return False
 
-    # util function to clean special characters
+    # función de utilidad para limpiar caracteres especiales
     def __filter_string(self, str):
         strOut = str.replace('\r', ' ').replace('\n', ' ').replace('\t', ' ')
         return strOut
