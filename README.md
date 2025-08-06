@@ -1,6 +1,6 @@
 # Google Maps Scraper (ES)
 
-Scraper de reseñas de Google Maps que permite extraer las reseñas **más recientes** a partir de la URL de un Punto de Interés (POI) específico en Google Maps. Una extensión adicional ayuda a monitorear y almacenar incrementalmente las reseñas en una instancia de MongoDB. Este proyecto es un fork en español del orginal de [@gaspa99](https://github.com/gaspa93), el cual puedes revisar [aquí](https://github.com/gaspa93/googlemaps-scraper).
+Scraper de reseñas de Google Maps que permite extraer las reseñas **más recientes** a partir de la URL de un Punto de Interés (POI) específico en Google Maps. Una extensión adicional ayuda a monitorear y almacenar incrementalmente las reseñas en una instancia de MongoDB. Este proyecto es un fork en español del orginal de [@gaspa93](https://github.com/gaspa93), el cual puedes revisar [aquí](https://github.com/gaspa93/googlemaps-scraper).
 
 ## Instalación
 
