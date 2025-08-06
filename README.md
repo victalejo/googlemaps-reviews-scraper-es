@@ -1,6 +1,6 @@
-# Google Maps Scraper
+# Google Maps Scraper (ES)
 
-Scraper de reseñas de Google Maps que permite extraer las reseñas **más recientes** a partir de la URL de un Punto de Interés (POI) específico en Google Maps. Una extensión adicional ayuda a monitorear y almacenar incrementalmente las reseñas en una instancia de MongoDB.
+Scraper de reseñas de Google Maps que permite extraer las reseñas **más recientes** a partir de la URL de un Punto de Interés (POI) específico en Google Maps. Una extensión adicional ayuda a monitorear y almacenar incrementalmente las reseñas en una instancia de MongoDB. Este proyecto es un fork en español del orginal de [@gaspa99](https://github.com/gaspa93), el cual puedes revisar [aquí](https://github.com/gaspa93/googlemaps-scraper).
 
 ## Instalación
 
@@ -40,7 +40,7 @@ Adicionalmente, se pueden proporcionar otros parámetros:
 - `--source`: valor booleano que permite almacenar la URL de origen como un campo adicional en el CSV (por defecto: false).
 - `--sort_by`: valor de cadena entre `most_relevant`, `newest`, `highest_rating` o `lowest_rating` (por defecto: `newest`), desarrollado por @quaesito y que permite cambiar el comportamiento de ordenación de las reseñas.
 
-Para una descripción básica de la lógica y el enfoque de este desarrollo de software, echa un vistazo al [artículo de Medium](enlace-al-articulo).
+Para una descripción básica de la lógica y el enfoque de este desarrollo de software, echa un vistazo a este [artículo de Medium](https://medium.com/data-science/scraping-google-maps-reviews-in-python-2b153c655fc2).
 
 ## Funcionalidad de Monitoreo
 
@@ -53,7 +53,7 @@ El script toma dos entradas:
 
 La idea principal es ejecutar el script **periódicamente** para obtener las últimas reseñas: el scraper las almacena en MongoDB hasta que obtiene la última reseña de la ejecución anterior o el día indicado en el parámetro de entrada.
 
-Echa un vistazo a [este artículo de Medium](enlace-al-articulo) para obtener más detalles sobre la idea detrás de esta característica.
+Echa un vistazo a este otro [artículo de Medium](https://medium.com/@mattiagasparini2/monitoring-of-google-maps-reviews-29e5d35f9d17) para obtener más detalles sobre la idea detrás de esta característica.
 
 ## Notas
 
