@@ -69,8 +69,10 @@ services:
       - ./app:/app/app
       - ./googlemaps.py:/app/googlemaps.py
       - ./worker.py:/app/worker.py
+      - ./entrypoint.py:/app/entrypoint.py
       - ./data:/app/data
     environment:
+      - SERVICE_TYPE=worker
       - MONGODB_URL=mongodb://mongodb:27017/
       - MONGODB_DB=googlemaps
       - REDIS_URL=redis://redis:6379/0
@@ -81,7 +83,6 @@ services:
       - redis
     networks:
       - googlemaps-network
-    command: python worker.py
 
 networks:
   googlemaps-network:

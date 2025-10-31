@@ -54,6 +54,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
 COPY googlemaps.py .
 COPY worker.py .
+COPY entrypoint.py .
 
 # Create directories for data and logs
 RUN mkdir -p /app/data /app/logs
@@ -65,5 +66,5 @@ ENV DISPLAY=:99
 # Expose port for FastAPI
 EXPOSE 8000
 
-# Default command (can be overridden in docker-compose.yml)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Default command - starts API by default, can be changed with SERVICE_TYPE env var
+CMD ["python", "entrypoint.py"]
