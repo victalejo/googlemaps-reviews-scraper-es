@@ -127,6 +127,15 @@ class GoogleMapsScraper:
 
 
     def get_reviews(self, offset):
+        # Wait for page to load with multiple strategies
+        wait = WebDriverWait(self.driver, MAX_WAIT)
+
+        try:
+            # Wait for reviews section to be present
+            wait.until(lambda d: d.execute_script('return document.readyState') == 'complete')
+            time.sleep(2)  # Additional wait for AJAX content
+        except:
+            pass  # Continue even if wait times out
 
         # desplazarse para cargar reseñas
         self.__scroll()
@@ -380,9 +389,32 @@ class GoogleMapsScraper:
 
     def __scroll(self):
         # TODO: Sujeto a cambios
-        scrollable_div = self.driver.find_element(By.CSS_SELECTOR,'div.m6QErb.DxyBCb.kA9KIf.dS8AEf')
-        self.driver.execute_script('arguments[0].scrollTop = arguments[0].scrollHeight', scrollable_div)
-        #self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        # Try multiple selector strategies as Google Maps changes CSS classes frequently
+        selectors = [
+            'div.m6QErb.DxyBCb.kA9KIf.dS8AEf',  # Original selector
+            'div.m6QErb',  # More generic
+            'div[role="main"]',  # Semantic selector
+            'div.fontBodyMedium'  # Another common class
+        ]
+
+        scrollable_div = None
+        for selector in selectors:
+            try:
+                scrollable_div = self.driver.find_element(By.CSS_SELECTOR, selector)
+                if scrollable_div:
+                    break
+            except:
+                continue
+
+        if scrollable_div:
+            try:
+                self.driver.execute_script('arguments[0].scrollTop = arguments[0].scrollHeight', scrollable_div)
+            except:
+                # Fallback to window scroll
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        else:
+            # If no scrollable div found, try window scroll
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
 
 
     def __get_logger(self):

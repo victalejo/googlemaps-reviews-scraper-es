@@ -131,19 +131,19 @@ class ReviewInDB(BaseModel):
 class ReviewResponse(BaseModel):
     """Response model for review."""
     id_review: str
-    place_id: str
-    client_id: str
-    branch_id: str
+    place_id: Optional[str] = None
+    client_id: Optional[str] = None
+    branch_id: Optional[str] = None
     caption: str
     relative_date: str
     review_date: datetime
     retrieval_date: datetime
     rating: float
     username: str
-    n_review_user: Optional[int]
-    n_photo_user: Optional[int]
-    url_user: Optional[str]
-    notified_via_webhook: bool
+    n_review_user: Optional[int] = None
+    n_photo_user: Optional[int] = None
+    url_user: Optional[str] = None
+    notified_via_webhook: bool = False
 
     class Config:
         json_encoders = {
