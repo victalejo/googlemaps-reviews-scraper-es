@@ -9,7 +9,8 @@
       "Bash(docker:*)",
       "Bash(docker-compose:*)",
       "Bash(/dev/null)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(test:*)"
     ],
     "deny": [],
     "ask": []

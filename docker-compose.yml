@@ -68,6 +68,7 @@ services:
     volumes:
       - ./app:/app/app
       - ./googlemaps.py:/app/googlemaps.py
+      - ./worker.py:/app/worker.py
       - ./data:/app/data
     environment:
       - MONGODB_URL=mongodb://mongodb:27017/
@@ -80,7 +81,7 @@ services:
       - redis
     networks:
       - googlemaps-network
-    command: rq worker scraping_tasks --url redis://redis:6379/0
+    command: python worker.py
 
 networks:
   googlemaps-network:
