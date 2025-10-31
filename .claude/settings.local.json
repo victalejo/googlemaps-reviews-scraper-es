@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(copy .env.example .env 2)",
+      "Bash(nul)",
+      "Bash(dir:*)",
+      "Bash(dir /b:*)",
+      "Bash(python:*)",
+      "Bash(docker:*)",
+      "Bash(docker-compose:*)",
+      "Bash(/dev/null)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

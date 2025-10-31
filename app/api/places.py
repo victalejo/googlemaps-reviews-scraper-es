@@ -39,8 +39,10 @@ async def create_place(place: PlaceCreate):
     """
     collection = get_places_collection()
 
-    # Create place document
-    place_doc = PlaceInDB(**place.dict())
+    # Create place document - convert HttpUrl to string
+    place_data = place.dict()
+    place_data['webhook_url'] = str(place_data['webhook_url'])
+    place_doc = PlaceInDB(**place_data)
 
     try:
         # Check if place with same URL already exists for this client/branch

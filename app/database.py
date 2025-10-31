@@ -73,7 +73,7 @@ def initialize_database():
     places_collection.create_index([("client_id", ASCENDING), ("branch_id", ASCENDING)])
     places_collection.create_index("monitoring_enabled")
     places_collection.create_index("last_check")
-    places_collection.create_index("created_at", direction=DESCENDING)
+    places_collection.create_index([("created_at", DESCENDING)])
 
     # Create indexes for reviews collection
     logger.info("Creating indexes for reviews collection...")
@@ -83,8 +83,8 @@ def initialize_database():
     reviews_collection.create_index("branch_id")
     reviews_collection.create_index([("client_id", ASCENDING), ("branch_id", ASCENDING)])
     reviews_collection.create_index([("place_id", ASCENDING), ("review_date", DESCENDING)])
-    reviews_collection.create_index("review_date", direction=DESCENDING)
-    reviews_collection.create_index("retrieval_date", direction=DESCENDING)
+    reviews_collection.create_index([("review_date", DESCENDING)])
+    reviews_collection.create_index([("retrieval_date", DESCENDING)])
     reviews_collection.create_index("rating")
     reviews_collection.create_index("notified_via_webhook")
 
