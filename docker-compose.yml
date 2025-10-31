@@ -1,0 +1,93 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: googlemaps-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=googlemaps
+    networks:
+      - googlemaps-network
+
+  # Redis (for RQ task queue)
+  redis:
+    image: redis:7.2-alpine
+    container_name: googlemaps-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - googlemaps-network
+
+  # FastAPI Application
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: googlemaps-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./googlemaps.py:/app/googlemaps.py
+      - ./data:/app/data
+      - ./monitor.log:/app/monitor.log
+      - ./api.log:/app/api.log
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017/
+      - MONGODB_DB=googlemaps
+      - REDIS_URL=redis://redis:6379/0
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - DEBUG=False
+      - HEADLESS_MODE=True
+      - ENABLE_MONITORING_ON_STARTUP=True
+      - DEFAULT_CHECK_INTERVAL=60
+      - LOG_LEVEL=INFO
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - googlemaps-network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  # RQ Worker (for background scraping tasks)
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: googlemaps-worker
+    restart: unless-stopped
+    volumes:
+      - ./app:/app/app
+      - ./googlemaps.py:/app/googlemaps.py
+      - ./data:/app/data
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017/
+      - MONGODB_DB=googlemaps
+      - REDIS_URL=redis://redis:6379/0
+      - HEADLESS_MODE=True
+      - LOG_LEVEL=INFO
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - googlemaps-network
+    command: rq worker scraping_tasks --url redis://redis:6379/0
+
+networks:
+  googlemaps-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+  redis_data:

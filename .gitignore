@@ -113,3 +113,15 @@ test/
 !urls.txt
 !urls_places.txt
 chromedriver*
+
+# API specific
+api.log
+monitor.log
+worker.log
+data/
+logs/
+.vscode/
+.idea/
+
+# Docker
+.dockerignore
