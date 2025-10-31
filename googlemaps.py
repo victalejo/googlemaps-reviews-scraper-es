@@ -417,6 +417,12 @@ class GoogleMapsScraper:
         options.add_argument("--disable-notifications")
         #options.add_argument("--lang=en-GB")
         options.add_argument("--accept-lang=es")
+
+        # Opciones necesarias para Docker
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+
         input_driver = webdriver.Chrome(service=Service(), options=options)
 
          # hacer clic en el botón de aceptar de Google para poder continuar (ya no es necesario)

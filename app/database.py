@@ -46,11 +46,15 @@ def get_reviews_collection() -> Collection:
 
 
 def get_redis_client() -> Redis:
-    """Get or create Redis client instance."""
+    """
+    Get or create Redis client instance.
+    Note: decode_responses=False (default) is required for RQ compatibility.
+    RQ uses pickle to serialize job data, which is binary and not UTF-8 strings.
+    """
     global _redis_client
     if _redis_client is None:
         logger.info(f"Connecting to Redis at {settings.redis_url}")
-        _redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
+        _redis_client = Redis.from_url(settings.redis_url, decode_responses=False)
     return _redis_client
 
 
