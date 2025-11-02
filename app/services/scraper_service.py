@@ -69,13 +69,9 @@ def scrape_reviews(
             logger.info(f"Sorting by: {sort_by} (index: {sort_index})")
             scraper.sort_by(url, sort_index)
 
-            # Get reviews with offset 0 (all reviews from beginning)
-            logger.info("Fetching reviews...")
-            reviews = scraper.get_reviews(offset=0)
-
-            # Limit to max_reviews
-            if len(reviews) > max_reviews:
-                reviews = reviews[:max_reviews]
+            # Get reviews with offset 0 and max_reviews limit
+            logger.info(f"Fetching up to {max_reviews} reviews...")
+            reviews = scraper.get_reviews(offset=0, max_reviews=max_reviews)
 
             logger.info(f"Successfully scraped {len(reviews)} reviews")
 

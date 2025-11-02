@@ -126,7 +126,7 @@ class GoogleMapsScraper:
 
 
 
-    def get_reviews(self, offset):
+    def get_reviews(self, offset, max_reviews=100):
         # Wait for page to load with multiple strategies
         wait = WebDriverWait(self.driver, MAX_WAIT)
 
@@ -137,27 +137,52 @@ class GoogleMapsScraper:
         except:
             pass  # Continue even if wait times out
 
-        # desplazarse para cargar reseñas
-        self.__scroll()
-
-        # esperar a que se carguen otras reseñas (ajax)
-        time.sleep(4)
-
-        # expandir texto de la reseña
-        self.__expand_reviews()
-
-        # analizar reseñas
-        response = BeautifulSoup(self.driver.page_source, 'html.parser')
-        # TODO: Sujeto a cambios
-        rblock = response.find_all('div', class_='jftiEf fontBodyMedium')
         parsed_reviews = []
-        for index, review in enumerate(rblock):
-            if index >= offset:
-                r = self.__parse(review)
-                parsed_reviews.append(r)
+        scrolls = 0
+        max_scrolls = min(MAX_SCROLLS, (max_reviews // 10) + 5)  # Estimate scrolls needed
 
-                # registro en la salida estándar
-                print(r)
+        while len(parsed_reviews) < max_reviews and scrolls < max_scrolls:
+            # desplazarse para cargar reseñas
+            self.__scroll()
+            scrolls += 1
+
+            # esperar a que se carguen otras reseñas (ajax)
+            time.sleep(3)
+
+            # expandir texto de la reseña
+            self.__expand_reviews()
+
+            # analizar reseñas
+            response = BeautifulSoup(self.driver.page_source, 'html.parser')
+            # TODO: Sujeto a cambios
+            rblock = response.find_all('div', class_='jftiEf fontBodyMedium')
+
+            # Parse all reviews found so far
+            current_reviews = []
+            for index, review in enumerate(rblock):
+                if index >= offset:
+                    r = self.__parse(review)
+                    # Avoid duplicates by checking if review already exists
+                    if r not in parsed_reviews:
+                        current_reviews.append(r)
+
+            # If no new reviews were found, break to avoid infinite loop
+            if not current_reviews:
+                print(f"No new reviews found after {scrolls} scrolls")
+                break
+
+            # Add new reviews
+            for r in current_reviews:
+                if len(parsed_reviews) < max_reviews:
+                    parsed_reviews.append(r)
+                    # registro en la salida estándar
+                    print(r)
+
+            print(f"Loaded {len(parsed_reviews)}/{max_reviews} reviews after {scrolls} scrolls")
+
+            # If we have enough reviews, stop scrolling
+            if len(parsed_reviews) >= max_reviews:
+                break
 
         return parsed_reviews
 

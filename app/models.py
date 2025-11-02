@@ -107,9 +107,9 @@ class PlaceResponse(BaseModel):
 class ReviewInDB(BaseModel):
     """Model representing a review in MongoDB."""
     id_review: str  # Unique review ID
-    place_id: str
-    client_id: str
-    branch_id: str
+    place_id: Optional[str] = None  # Optional - only provided when scraping through monitoring
+    client_id: Optional[str] = None  # Optional - only provided when scraping through monitoring
+    branch_id: Optional[str] = None  # Optional - only provided when scraping through monitoring
     caption: str
     relative_date: str
     review_date: datetime
