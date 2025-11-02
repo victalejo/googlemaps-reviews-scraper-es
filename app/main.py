@@ -39,7 +39,8 @@ async def lifespan(app: FastAPI):
         # Test connections
         status = test_connections()
         if not status["mongodb"] or not status["redis"]:
-            logger.error(f"Connection test failed: {status['error']}")
+            logger.warning(f"Connection test failed: {status['error']}")
+            logger.warning("API will start anyway. Connections will be retried automatically.")
         else:
             logger.info("All database connections successful")
 
@@ -51,7 +52,8 @@ async def lifespan(app: FastAPI):
 
     except Exception as e:
         logger.error(f"Error during startup: {e}")
-        raise
+        logger.warning("API will start anyway. Some features may not work until connections are established.")
+        # Don't raise - allow API to start even if databases are temporarily unavailable
 
     yield
 

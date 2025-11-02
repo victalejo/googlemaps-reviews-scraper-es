@@ -62,43 +62,52 @@ def initialize_database():
     """
     Initialize database collections and create indexes.
     Should be called on application startup.
+
+    Note: This function won't fail if MongoDB is temporarily unavailable.
+    Indexes will be created when MongoDB becomes available.
     """
     logger.info("Initializing database...")
 
-    # Get collections
-    places_collection = get_places_collection()
-    reviews_collection = get_reviews_collection()
+    try:
+        # Get collections
+        places_collection = get_places_collection()
+        reviews_collection = get_reviews_collection()
 
-    # Create indexes for places collection
-    logger.info("Creating indexes for places collection...")
-    places_collection.create_index("place_id", unique=True)
-    places_collection.create_index("client_id")
-    places_collection.create_index("branch_id")
-    places_collection.create_index([("client_id", ASCENDING), ("branch_id", ASCENDING)])
-    places_collection.create_index("monitoring_enabled")
-    places_collection.create_index("last_check")
-    places_collection.create_index([("created_at", DESCENDING)])
+        # Create indexes for places collection
+        logger.info("Creating indexes for places collection...")
+        places_collection.create_index("place_id", unique=True)
+        places_collection.create_index("client_id")
+        places_collection.create_index("branch_id")
+        places_collection.create_index([("client_id", ASCENDING), ("branch_id", ASCENDING)])
+        places_collection.create_index("monitoring_enabled")
+        places_collection.create_index("last_check")
+        places_collection.create_index([("created_at", DESCENDING)])
 
-    # Create indexes for reviews collection
-    logger.info("Creating indexes for reviews collection...")
-    reviews_collection.create_index("id_review", unique=True)
-    reviews_collection.create_index("place_id")
-    reviews_collection.create_index("client_id")
-    reviews_collection.create_index("branch_id")
-    reviews_collection.create_index([("client_id", ASCENDING), ("branch_id", ASCENDING)])
-    reviews_collection.create_index([("place_id", ASCENDING), ("review_date", DESCENDING)])
-    reviews_collection.create_index([("review_date", DESCENDING)])
-    reviews_collection.create_index([("retrieval_date", DESCENDING)])
-    reviews_collection.create_index("rating")
-    reviews_collection.create_index("notified_via_webhook")
+        # Create indexes for reviews collection
+        logger.info("Creating indexes for reviews collection...")
+        reviews_collection.create_index("id_review", unique=True)
+        reviews_collection.create_index("place_id")
+        reviews_collection.create_index("client_id")
+        reviews_collection.create_index("branch_id")
+        reviews_collection.create_index([("client_id", ASCENDING), ("branch_id", ASCENDING)])
+        reviews_collection.create_index([("place_id", ASCENDING), ("review_date", DESCENDING)])
+        reviews_collection.create_index([("review_date", DESCENDING)])
+        reviews_collection.create_index([("retrieval_date", DESCENDING)])
+        reviews_collection.create_index("rating")
+        reviews_collection.create_index("notified_via_webhook")
 
-    # Compound index for pagination queries
-    reviews_collection.create_index([
-        ("place_id", ASCENDING),
-        ("retrieval_date", DESCENDING)
-    ])
+        # Compound index for pagination queries
+        reviews_collection.create_index([
+            ("place_id", ASCENDING),
+            ("retrieval_date", DESCENDING)
+        ])
 
-    logger.info("Database initialization completed successfully")
+        logger.info("Database initialization completed successfully")
+
+    except Exception as e:
+        logger.warning(f"Could not initialize database indexes: {e}")
+        logger.warning("Database might not be available yet. Indexes will be created on first use.")
+        # Don't fail startup - PyMongo will retry connections automatically
 
 
 def close_connections():
