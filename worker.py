@@ -45,11 +45,16 @@ def main():
     # Create queue
     queue = Queue(settings.redis_queue_name, connection=redis_conn)
 
-    # Create and start worker
+    # Create and start worker with unique name (hostname + timestamp)
+    # This prevents conflicts with old workers that didn't shut down cleanly
+    import socket
+    import time
+    worker_name = f"worker-{socket.gethostname()}-{int(time.time())}"
+
     worker = Worker(
         [queue],
         connection=redis_conn,
-        name=f"worker-{settings.redis_queue_name}"
+        name=worker_name
     )
 
     logger.info(f"Worker '{worker.name}' started and listening for jobs...")

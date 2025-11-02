@@ -11,7 +11,10 @@ services:
     volumes:
       - mongodb_data:/data/db
     networks:
-      - googlemaps-network
+      googlemaps-network:
+        aliases:
+          - mongodb
+          - mongo
 
   # Redis Queue
   redis:
@@ -23,7 +26,9 @@ services:
     volumes:
       - redis_data:/data
     networks:
-      - googlemaps-network
+      googlemaps-network:
+        aliases:
+          - redis
     command: redis-server --appendonly yes
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
