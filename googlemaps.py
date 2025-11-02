@@ -274,9 +274,11 @@ class GoogleMapsScraper:
             relative_date = None
 
         try:
-            n_reviews = review.find('div', class_='RfnDt').text.split(' ')[3]
+            n_reviews_text = review.find('div', class_='RfnDt').text.split(' ')[3]
+            # Convert to int, removing any non-digit characters
+            n_reviews = int(''.join(filter(str.isdigit, n_reviews_text)))
         except Exception as e:
-            n_reviews = 0
+            n_reviews = None
 
         try:
             user_url = review.find('button', class_='WEBjve')['data-href']
@@ -443,31 +445,50 @@ class GoogleMapsScraper:
     def __scroll(self):
         # TODO: Sujeto a cambios
         # Try multiple selector strategies as Google Maps changes CSS classes frequently
+        # More specific selectors for the reviews container
         selectors = [
-            'div.m6QErb.DxyBCb.kA9KIf.dS8AEf',  # Original selector
+            'div[role="main"]',  # Semantic selector - most reliable
+            'div.m6QErb.DxyBCb.kA9KIf.dS8AEf',  # Original selector with all classes
+            'div.m6QErb.DxyBCb',  # Slightly more generic
             'div.m6QErb',  # More generic
-            'div[role="main"]',  # Semantic selector
-            'div.fontBodyMedium'  # Another common class
+            'div[class*="m6QErb"]',  # Contains m6QErb
+            'div.fontBodyMedium'  # Fallback
         ]
 
-        scrollable_div = None
+        scrolled = False
         for selector in selectors:
             try:
                 scrollable_div = self.driver.find_element(By.CSS_SELECTOR, selector)
                 if scrollable_div:
-                    break
-            except:
+                    # Get current scroll position
+                    scroll_before = self.driver.execute_script('return arguments[0].scrollTop', scrollable_div)
+
+                    # Scroll to bottom
+                    self.driver.execute_script('arguments[0].scrollTop = arguments[0].scrollHeight', scrollable_div)
+
+                    # Small wait for scroll to complete
+                    time.sleep(0.5)
+
+                    # Verify scroll happened
+                    scroll_after = self.driver.execute_script('return arguments[0].scrollTop', scrollable_div)
+
+                    if scroll_after > scroll_before:
+                        self.logger.debug(f'Scrolled successfully with selector: {selector} (from {scroll_before} to {scroll_after})')
+                        scrolled = True
+                        break
+                    else:
+                        self.logger.debug(f'Selector {selector} found but scroll did not move')
+            except Exception as e:
                 continue
 
-        if scrollable_div:
+        # If no scroll worked, try window scroll as last resort
+        if not scrolled:
             try:
-                self.driver.execute_script('arguments[0].scrollTop = arguments[0].scrollHeight', scrollable_div)
-            except:
-                # Fallback to window scroll
+                self.logger.warning('Could not find scrollable reviews container, trying window scroll')
                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        else:
-            # If no scrollable div found, try window scroll
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(0.5)
+            except:
+                pass
 
 
     def __get_logger(self):

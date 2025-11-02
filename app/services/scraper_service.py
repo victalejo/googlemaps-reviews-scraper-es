@@ -139,7 +139,9 @@ def save_reviews_to_db(reviews: List[Dict]) -> int:
             logger.debug(f"Inserted review {review_doc.id_review}")
 
         except Exception as e:
-            logger.error(f"Error saving review: {e}")
+            review_id = review.get('id_review', 'unknown')
+            logger.error(f"Error saving review {review_id}: {e}")
+            logger.debug(f"Review data that failed: {review}")
             continue
 
     return saved_count
