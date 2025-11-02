@@ -51,27 +51,54 @@ class GoogleMapsScraper:
 
         wait = WebDriverWait(self.driver, MAX_WAIT)
 
-        # abrir menú desplegable
+        # abrir menú desplegable - try multiple selector strategies
         clicked = False
         tries = 0
+
+        # Multiple XPATH strategies for the sort button
+        sort_button_selectors = [
+            "//button[contains(@aria-label, 'Ordenar')]",
+            "//button[contains(@aria-label, 'Sort')]",
+            "//button[contains(@data-value, 'Sort')]",
+            "//button[contains(text(), 'Ordenar')]",
+            "//button[@class='g88MCb S9kvJb']"  # Fallback to class
+        ]
+
         while not clicked and tries < MAX_RETRY:
-            try:
-                menu_bt = wait.until(EC.element_to_be_clickable((By.XPATH, '//button[contains(@aria-label, \'Ordenar\')]')))
-                menu_bt.click()
+            for selector in sort_button_selectors:
+                try:
+                    menu_bt = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
+                    menu_bt.click()
+                    clicked = True
+                    self.logger.info(f'Sort button clicked successfully with selector: {selector}')
+                    time.sleep(3)
+                    break
+                except Exception as e:
+                    continue
 
-                clicked = True
-                time.sleep(3)
-            except Exception as e:
+            if not clicked:
                 tries += 1
-                self.logger.warning('No se pudo hacer clic en el botón de ordenar')
+                self.logger.warning(f'Failed to click sort button, attempt {tries}/{MAX_RETRY}')
+                time.sleep(2)
 
-            # no se pudo abrir el menú desplegable
-            if tries == MAX_RETRY:
-                return -1
+        # no se pudo abrir el menú desplegable
+        if not clicked:
+            self.logger.error('Could not open sort menu after all attempts')
+            return -1
 
         # elemento de la lista especificado según ind
-        recent_rating_bt = self.driver.find_elements(By.XPATH, '//div[@role=\'menuitemradio\']')[ind]
-        recent_rating_bt.click()
+        try:
+            menu_items = self.driver.find_elements(By.XPATH, '//div[@role=\'menuitemradio\']')
+            if len(menu_items) > ind:
+                recent_rating_bt = menu_items[ind]
+                recent_rating_bt.click()
+                self.logger.info(f'Selected sort option at index {ind}')
+            else:
+                self.logger.error(f'Sort option index {ind} not found, only {len(menu_items)} items available')
+                return -1
+        except Exception as e:
+            self.logger.error(f'Error selecting sort option: {e}')
+            return -1
 
         # esperar a que se cargue la reseña (llamada ajax)
         time.sleep(5)
@@ -138,6 +165,7 @@ class GoogleMapsScraper:
             pass  # Continue even if wait times out
 
         parsed_reviews = []
+        seen_ids = set()  # Track review IDs we've already seen to avoid duplicates
         scrolls = 0
         max_scrolls = min(MAX_SCROLLS, (max_reviews // 10) + 5)  # Estimate scrolls needed
 
@@ -158,27 +186,27 @@ class GoogleMapsScraper:
             rblock = response.find_all('div', class_='jftiEf fontBodyMedium')
 
             # Parse all reviews found so far
-            current_reviews = []
+            new_reviews_found = 0
             for index, review in enumerate(rblock):
                 if index >= offset:
                     r = self.__parse(review)
-                    # Avoid duplicates by checking if review already exists
-                    if r not in parsed_reviews:
-                        current_reviews.append(r)
+                    review_id = r.get('id_review')
+
+                    # Skip if we've already seen this review ID
+                    if review_id and review_id not in seen_ids:
+                        if len(parsed_reviews) < max_reviews:
+                            parsed_reviews.append(r)
+                            seen_ids.add(review_id)
+                            new_reviews_found += 1
+                            # registro en la salida estándar
+                            print(r)
+
+            print(f"Loaded {len(parsed_reviews)}/{max_reviews} reviews after {scrolls} scrolls (+{new_reviews_found} new)")
 
             # If no new reviews were found, break to avoid infinite loop
-            if not current_reviews:
-                print(f"No new reviews found after {scrolls} scrolls")
+            if new_reviews_found == 0:
+                print(f"No new reviews found after {scrolls} scrolls, stopping")
                 break
-
-            # Add new reviews
-            for r in current_reviews:
-                if len(parsed_reviews) < max_reviews:
-                    parsed_reviews.append(r)
-                    # registro en la salida estándar
-                    print(r)
-
-            print(f"Loaded {len(parsed_reviews)}/{max_reviews} reviews after {scrolls} scrolls")
 
             # If we have enough reviews, stop scrolling
             if len(parsed_reviews) >= max_reviews:

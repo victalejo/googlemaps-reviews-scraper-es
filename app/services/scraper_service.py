@@ -67,7 +67,12 @@ def scrape_reviews(
             # Sort reviews
             sort_index = SORT_MAP.get(sort_by, 0)
             logger.info(f"Sorting by: {sort_by} (index: {sort_index})")
-            scraper.sort_by(url, sort_index)
+            sort_result = scraper.sort_by(url, sort_index)
+
+            if sort_result == -1:
+                logger.warning(f"Failed to sort reviews by '{sort_by}'. Continuing with default sort order.")
+            else:
+                logger.info(f"Successfully sorted reviews by '{sort_by}'")
 
             # Get reviews with offset 0 and max_reviews limit
             logger.info(f"Fetching up to {max_reviews} reviews...")
