@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 
 # Mapping for sort_by parameter
 SORT_MAP = {
-    "newest": 0,
-    "most_relevant": 1,
-    "highest_rating": 2,
-    "lowest_rating": 3
+    "most_relevant": 0,  # "Más útiles" - default sort order
+    "newest": 1,         # "Más recientes" - sort by newest first
+    "highest_rating": 2, # "Valoración más alta"
+    "lowest_rating": 3   # "Valoración más baja"
 }
 
 

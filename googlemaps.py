@@ -9,19 +9,10 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException
-from selenium.webdriver import ChromeOptions as Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
-from webdriver_manager.chrome import ChromeDriverManager
+from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext, TimeoutError as PlaywrightTimeout
 
 GM_WEBPAGE = 'https://www.google.com/maps/'
-MAX_WAIT = 10
+MAX_WAIT = 10000  # 10 seconds in milliseconds for Playwright
 MAX_RETRY = 5
 MAX_SCROLLS = 40
 
@@ -29,8 +20,49 @@ class GoogleMapsScraper:
 
     def __init__(self, debug=False):
         self.debug = debug
-        self.driver = self.__get_driver()
+        self.playwright = None
+        self.browser = None
+        self.context = None
+        self.page = None
+        self.xvfb_process = None
+
+        # Start Xvfb FIRST if needed (when debug=True means non-headless mode)
+        import subprocess
+        import os
+        import sys
+        print(f'[XVFB DEBUG] self.debug={self.debug}, DISPLAY={os.environ.get("DISPLAY")}', file=sys.stderr, flush=True)
+        if self.debug:
+            print('[XVFB DEBUG] Entering Xvfb initialization block (non-headless mode)', file=sys.stderr, flush=True)
+
+            # Check if Xvfb is already running on display :99
+            try:
+                result = subprocess.run(['pgrep', '-f', 'Xvfb :99'], capture_output=True, text=True)
+                if result.returncode == 0:
+                    print('[XVFB] Xvfb already running on display :99, reusing it', file=sys.stderr, flush=True)
+                    os.environ['DISPLAY'] = ':99'
+                else:
+                    # Start Xvfb on display :99
+                    print('[XVFB DEBUG] Starting Xvfb on display :99...', file=sys.stderr, flush=True)
+                    self.xvfb_process = subprocess.Popen(
+                        ['Xvfb', ':99', '-screen', '0', '1366x768x24', '-ac', '+extension', 'GLX', '+render', '-noreset'],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    os.environ['DISPLAY'] = ':99'
+                    import time
+                    time.sleep(2)  # Wait for Xvfb to start
+                    print('[XVFB] Successfully started Xvfb on display :99', file=sys.stderr, flush=True)
+            except Exception as e:
+                print(f'[XVFB ERROR] Could not start Xvfb: {e}', file=sys.stderr, flush=True)
+                import traceback
+                traceback.print_exc(file=sys.stderr)
+        else:
+            print('[XVFB DEBUG] debug=False, skipping Xvfb (using headless mode)', file=sys.stderr, flush=True)
+
+        # Initialize logger AFTER Xvfb
         self.logger = self.__get_logger()
+
+        self.__get_driver()
 
     def __enter__(self):
         return self
@@ -39,40 +71,52 @@ class GoogleMapsScraper:
         if exc_type is not None:
             traceback.print_exception(exc_type, exc_value, tb)
 
-        self.driver.close()
-        self.driver.quit()
+        if self.page:
+            self.page.close()
+        if self.context:
+            self.context.close()
+        if self.browser:
+            self.browser.close()
+        if self.playwright:
+            self.playwright.stop()
+
+        # Stop Xvfb if we started it
+        if hasattr(self, 'xvfb_process') and self.xvfb_process:
+            try:
+                self.xvfb_process.terminate()
+                self.xvfb_process.wait(timeout=5)
+            except:
+                pass
 
         return True
 
     def sort_by(self, url, ind):
 
-        self.driver.get(url)
+        self.page.goto(url)
         self.__click_on_cookie_agreement()
-
-        wait = WebDriverWait(self.driver, MAX_WAIT)
 
         # abrir menú desplegable - try multiple selector strategies
         clicked = False
         tries = 0
 
-        # Multiple XPATH strategies for the sort button
+        # Multiple selector strategies for the sort button
         sort_button_selectors = [
-            "//button[contains(@aria-label, 'Ordenar')]",
-            "//button[contains(@aria-label, 'Sort')]",
-            "//button[contains(@data-value, 'Sort')]",
-            "//button[contains(text(), 'Ordenar')]",
-            "//button[@class='g88MCb S9kvJb']"  # Fallback to class
+            "button[aria-label*='Ordenar']",
+            "button[aria-label*='Sort']",
+            "button[data-value*='Sort']",
+            "button.g88MCb.S9kvJb"
         ]
 
         while not clicked and tries < MAX_RETRY:
             for selector in sort_button_selectors:
                 try:
-                    menu_bt = wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
-                    menu_bt.click()
-                    clicked = True
-                    self.logger.info(f'Sort button clicked successfully with selector: {selector}')
-                    time.sleep(3)
-                    break
+                    menu_bt = self.page.wait_for_selector(selector, timeout=MAX_WAIT, state='visible')
+                    if menu_bt:
+                        menu_bt.click()
+                        clicked = True
+                        self.logger.info(f'Sort button clicked successfully with selector: {selector}')
+                        time.sleep(3)
+                        break
                 except Exception as e:
                     continue
 
@@ -88,7 +132,7 @@ class GoogleMapsScraper:
 
         # elemento de la lista especificado según ind
         try:
-            menu_items = self.driver.find_elements(By.XPATH, '//div[@role=\'menuitemradio\']')
+            menu_items = self.page.query_selector_all('div[role="menuitemradio"]')
             if len(menu_items) > ind:
                 recent_rating_bt = menu_items[ind]
                 recent_rating_bt.click()
@@ -100,8 +144,50 @@ class GoogleMapsScraper:
             self.logger.error(f'Error selecting sort option: {e}')
             return -1
 
-        # esperar a que se cargue la reseña (llamada ajax)
+        # esperar a que se cargue la reseña (llamada ajax) - increased wait time for "newest" sort
+        self.logger.info('Waiting for reviews to reload after sorting...')
+
+        # Wait for the page to start reloading (URL might change)
+        time.sleep(3)
+
+        # Wait for network to be idle after sorting
+        try:
+            self.page.wait_for_load_state('networkidle', timeout=15000)
+            self.logger.info('Network idle after sorting')
+        except Exception as e:
+            self.logger.warning(f'Network idle wait timeout: {e}')
+
+        # Additional wait for AJAX content to render
         time.sleep(5)
+
+        # Wait specifically for reviews to be present with increased timeout
+        try:
+            self.page.wait_for_selector('div.jftiEf.fontBodyMedium', timeout=15000, state='visible')
+            self.logger.info('Reviews selector found after sorting')
+        except Exception as e:
+            self.logger.warning(f'Timeout waiting for reviews selector: {e}')
+
+        # Additional wait for all reviews to render
+        time.sleep(3)
+
+        # Verify reviews loaded
+        try:
+            review_count = len(self.page.query_selector_all('div.jftiEf.fontBodyMedium'))
+            self.logger.info(f'Found {review_count} reviews after sorting')
+        except:
+            pass
+
+        # Force a scroll to trigger lazy loading of reviews after sorting
+        self.logger.info('Forcing scroll to load more reviews after sorting...')
+        try:
+            self.__scroll()
+            time.sleep(3)  # Wait for reviews to load after scroll
+
+            # Verify again after scroll
+            review_count_after = len(self.page.query_selector_all('div.jftiEf.fontBodyMedium'))
+            self.logger.info(f'After forced scroll: {review_count_after} reviews now loaded')
+        except Exception as e:
+            self.logger.warning(f'Error during forced scroll after sorting: {e}')
 
         return 0
 
@@ -118,23 +204,24 @@ class GoogleMapsScraper:
                 df_places = df_places[['search_point_url', 'href', 'name', 'rating', 'num_reviews', 'close_time', 'other']]
                 df_places.to_csv('output/places_wax.csv', index=False)
 
-
             try:
-                self.driver.get(search_point_url)
-            except NoSuchElementException:
-                self.driver.quit()
-                self.driver = self.__get_driver()
-                self.driver.get(search_point_url)
+                self.page.goto(search_point_url)
+            except:
+                # Recreate page if needed
+                if self.page:
+                    self.page.close()
+                self.page = self.context.new_page()
+                self.page.goto(search_point_url)
 
             # desplazarse para cargar los 20 lugares en la página
-            scrollable_div = self.driver.find_element(By.CSS_SELECTOR,
-                "div.m6QErb.DxyBCb.kA9KIf.dS8AEf.ecceSd > div[aria-label*='Resultados para']")
-            for i in range(10):
-                self.driver.execute_script('arguments[0].scrollTop = arguments[0].scrollHeight', scrollable_div)
+            scrollable_div = self.page.query_selector("div.m6QErb.DxyBCb.kA9KIf.dS8AEf.ecceSd > div[aria-label*='Resultados para']")
+            if scrollable_div:
+                for i in range(10):
+                    self.page.evaluate('(el) => el.scrollTop = el.scrollHeight', scrollable_div)
 
             # Obtener nombres de lugares y href
             time.sleep(2)
-            response = BeautifulSoup(self.driver.page_source, 'html.parser')
+            response = BeautifulSoup(self.page.content(), 'html.parser')
             div_places = response.select('div[jsaction] > a[href]')
 
             for div_place in div_places:
@@ -154,14 +241,19 @@ class GoogleMapsScraper:
 
 
     def get_reviews(self, offset, max_reviews=100):
-        # Wait for page to load with multiple strategies
-        wait = WebDriverWait(self.driver, MAX_WAIT)
-
+        # Wait for page to load
         try:
             # Wait for reviews section to be present
-            wait.until(lambda d: d.execute_script('return document.readyState') == 'complete')
-            time.sleep(2)  # Additional wait for AJAX content
-        except:
+            self.page.wait_for_load_state('domcontentloaded')
+            time.sleep(3)  # Wait for initial AJAX content
+
+            # Wait for reviews to load
+            self.page.wait_for_selector('div.jftiEf.fontBodyMedium', timeout=MAX_WAIT)
+            time.sleep(2)  # Additional wait for all reviews to render
+
+            self.logger.info('Reviews section loaded successfully')
+        except Exception as e:
+            self.logger.warning(f'Timeout waiting for reviews to load: {e}')
             pass  # Continue even if wait times out
 
         parsed_reviews = []
@@ -188,7 +280,7 @@ class GoogleMapsScraper:
             self.__expand_reviews()
 
             # analizar reseñas
-            response = BeautifulSoup(self.driver.page_source, 'html.parser')
+            response = BeautifulSoup(self.page.content(), 'html.parser')
             # TODO: Sujeto a cambios
             rblock = response.find_all('div', class_='jftiEf fontBodyMedium')
 
@@ -240,13 +332,13 @@ class GoogleMapsScraper:
     # necesita usar una URL diferente a la de las reseñas para tener toda la información
     def get_account(self, url):
 
-        self.driver.get(url)
+        self.page.goto(url)
         self.__click_on_cookie_agreement()
 
         # llamada ajax también para esta sección
         time.sleep(2)
 
-        resp = BeautifulSoup(self.driver.page_source, 'html.parser')
+        resp = BeautifulSoup(self.page.content(), 'html.parser')
 
         place_data = self.__parse_place(resp, url)
 
@@ -330,7 +422,7 @@ class GoogleMapsScraper:
         try:
             # Ignorar la palabra "Editado" si está presente
             relative_date_str = relative_date_str.replace("Editado ", "").strip()
-            
+
             # Buscar el número o la palabra "un"/"una"
             match = re.search(r'(\d+)', relative_date_str)
             if match:
@@ -410,7 +502,7 @@ class GoogleMapsScraper:
             place['phone_number'] = b_list[2].text
         except Exception as e:
             place['phone_number'] = None
-    
+
         try:
             place['plus_code'] = b_list[3].text
         except Exception as e:
@@ -456,137 +548,204 @@ class GoogleMapsScraper:
 
     # expandir la descripción de la reseña
     def __expand_reviews(self):
-        # usar XPath para cargar reseñas completas
+        # usar selector CSS para cargar reseñas completas
         # TODO: Sujeto a cambios
-        buttons = self.driver.find_elements(By.CSS_SELECTOR,'button.w8nwRe.kyuRq')
+        buttons = self.page.query_selector_all('button.w8nwRe.kyuRq')
         for button in buttons:
-            self.driver.execute_script("arguments[0].click();", button)
+            try:
+                button.click()
+            except:
+                pass  # Skip if button can't be clicked
 
 
     def __scroll(self):
         # TODO: Sujeto a cambios
         # Returns True if scroll was successful, False otherwise
 
-        # Strategy 1: Scroll to last review element to trigger loading more reviews
+        # AGGRESSIVE Strategy 1: Scroll parent containers multiple times
         try:
-            # Find all review elements currently in the DOM
-            review_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div.jftiEf.fontBodyMedium')
-
-            if review_elements and len(review_elements) > 0:
-                # Scroll to the last review to trigger loading
-                last_review = review_elements[-1]
-
-                # Get scroll position before scrolling
-                script_before = """
-                    var container = document.querySelector('div[role="main"]');
-                    return container ? container.scrollTop : window.pageYOffset;
-                """
-                scroll_before = self.driver.execute_script(script_before)
-
-                # Scroll to last element
-                self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'end'});", last_review)
-                time.sleep(1)  # Wait for scroll animation
-
-                # Get scroll position after scrolling
-                scroll_after = self.driver.execute_script(script_before)
-
-                if scroll_after > scroll_before:
-                    self.logger.debug(f'Strategy 1 SUCCESS: Scrolled to last review element (found {len(review_elements)} reviews, scrolled {scroll_before} -> {scroll_after})')
-                    return True
-                else:
-                    self.logger.debug(f'Strategy 1 FAILED: Scroll position did not change ({scroll_before} -> {scroll_after})')
-        except Exception as e:
-            self.logger.debug(f'Strategy 1 failed (scroll to last review): {e}')
-
-        # Strategy 2: Find scrollable div with overflow and scroll it
-        try:
-            # JavaScript to find the scrollable parent
             script = """
-                // Find the reviews container that has overflow
-                var elements = document.querySelectorAll('div[role="main"], div.m6QErb, div[class*="m6QErb"], div.fontBodyMedium');
-                for (var i = 0; i < elements.length; i++) {
-                    var style = window.getComputedStyle(elements[i]);
-                    var overflow = style.overflowY || style.overflow;
-                    if (overflow === 'auto' || overflow === 'scroll') {
-                        // Found scrollable element, scroll it
-                        var beforeScroll = elements[i].scrollTop;
-                        elements[i].scrollTop = elements[i].scrollHeight;
-                        var afterScroll = elements[i].scrollTop;
-                        if (afterScroll > beforeScroll) {
-                            return {success: true, before: beforeScroll, after: afterScroll, selector: elements[i].className};
+                () => {
+                    // Find ANY container with reviews and force scroll on it AND its parents
+                    var reviewElements = document.querySelectorAll('div.jftiEf');
+                    if (reviewElements.length > 0) {
+                        var elem = reviewElements[0];
+                        var scrolled = false;
+
+                        // Try to scroll the element and up to 10 parent levels
+                        for (var i = 0; i < 10; i++) {
+                            if (!elem) break;
+
+                            var beforeScroll = elem.scrollTop;
+
+                            // Try multiple scroll techniques
+                            elem.scrollTop += 3000;  // Large scroll
+                            elem.scrollBy(0, 3000);
+
+                            // Dispatch scroll event
+                            elem.dispatchEvent(new Event('scroll'));
+
+                            var afterScroll = elem.scrollTop;
+
+                            if (afterScroll > beforeScroll) {
+                                scrolled = true;
+                            }
+
+                            elem = elem.parentElement;
+                        }
+
+                        return {success: scrolled, method: 'parent_scroll'};
+                    }
+                    return {success: false};
+                }
+            """
+
+            result = self.page.evaluate(script)
+            if result and result.get('success'):
+                self.logger.debug(f'AGGRESSIVE Strategy 1 SUCCESS: Scrolled parent containers')
+                time.sleep(3)
+                return True
+        except Exception as e:
+            self.logger.debug(f'AGGRESSIVE Strategy 1 failed: {e}')
+
+        # AGGRESSIVE Strategy 2: Simulate mouse wheel events
+        try:
+            review_elements = self.page.query_selector_all('div.jftiEf.fontBodyMedium')
+            if review_elements and len(review_elements) > 0:
+                # Get the last review position
+                last_review = review_elements[-1]
+                box = last_review.bounding_box()
+
+                if box:
+                    # Move mouse to the review area and scroll with wheel
+                    self.page.mouse.move(box['x'] + box['width']/2, box['y'])
+
+                    # Multiple wheel scrolls
+                    for _ in range(5):
+                        self.page.mouse.wheel(0, 500)
+                        time.sleep(0.3)
+
+                    self.logger.debug(f'AGGRESSIVE Strategy 2 SUCCESS: Mouse wheel scroll')
+                    time.sleep(2)
+                    return True
+        except Exception as e:
+            self.logger.debug(f'AGGRESSIVE Strategy 2 failed: {e}')
+
+        # AGGRESSIVE Strategy 3: Force scroll on document body and all scrollable elements
+        try:
+            script = """
+                () => {
+                    var scrolled = false;
+
+                    // Scroll the body
+                    window.scrollBy(0, 1000);
+                    document.body.scrollTop += 1000;
+                    document.documentElement.scrollTop += 1000;
+
+                    // Find and scroll ALL elements (not just the scrollable ones)
+                    var allDivs = document.querySelectorAll('div');
+                    for (var i = 0; i < allDivs.length; i++) {
+                        var div = allDivs[i];
+                        var beforeScroll = div.scrollTop;
+
+                        div.scrollTop += 2000;
+                        div.scrollBy(0, 2000);
+
+                        if (div.scrollTop > beforeScroll) {
+                            scrolled = true;
                         }
                     }
+
+                    return {success: scrolled, method: 'force_all_scroll'};
                 }
-                return {success: false};
             """
-            result = self.driver.execute_script(script)
 
+            result = self.page.evaluate(script)
             if result and result.get('success'):
-                self.logger.debug(f'Strategy 2 SUCCESS: Scrolled from {result.get("before")} to {result.get("after")}')
-                time.sleep(1)
+                self.logger.debug(f'AGGRESSIVE Strategy 3 SUCCESS: Force scrolled all elements')
+                time.sleep(3)
                 return True
-            else:
-                self.logger.debug('Strategy 2 FAILED: No scrollable element with overflow found or scroll did not move')
         except Exception as e:
-            self.logger.debug(f'Strategy 2 failed (find overflow container): {e}')
+            self.logger.debug(f'AGGRESSIVE Strategy 3 failed: {e}')
 
-        # Strategy 3: Try scrolling the main panel by pixel amount
+        # AGGRESSIVE Strategy 4: Click and drag simulation
         try:
-            script = """
-                var mainPanel = document.querySelector('div[role="main"]');
-                if (mainPanel) {
-                    var beforeScroll = mainPanel.scrollTop;
-                    mainPanel.scrollBy(0, 1000);
-                    var afterScroll = mainPanel.scrollTop;
-                    return {success: afterScroll > beforeScroll, before: beforeScroll, after: afterScroll};
-                }
-                return {success: false};
-            """
-            result = self.driver.execute_script(script)
-            if result and result.get('success'):
-                self.logger.debug(f'Strategy 3 SUCCESS: Scrolled main panel from {result.get("before")} to {result.get("after")}')
-                time.sleep(1)
-                return True
-            else:
-                self.logger.debug('Strategy 3 FAILED: Main panel not found or scroll did not move')
-        except Exception as e:
-            self.logger.debug(f'Strategy 3 failed (scrollBy): {e}')
-
-        # Strategy 4: Try ActionChains for more reliable scrolling
-        try:
-            review_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div.jftiEf.fontBodyMedium')
+            review_elements = self.page.query_selector_all('div.jftiEf.fontBodyMedium')
             if review_elements and len(review_elements) > 0:
-                # Move to last review and send PAGE_DOWN key
-                actions = ActionChains(self.driver)
-                actions.move_to_element(review_elements[-1]).perform()
-                time.sleep(0.5)
-                actions.send_keys(Keys.PAGE_DOWN).perform()
-                time.sleep(0.5)
-                self.logger.debug('Strategy 4: Used ActionChains to scroll')
-                return True
-        except Exception as e:
-            self.logger.debug(f'Strategy 4 failed (ActionChains): {e}')
+                last_review = review_elements[-1]
 
-        # Last resort: window scroll
-        try:
-            self.logger.warning('All primary scroll strategies failed, trying window scroll as last resort')
-            script = """
-                var beforeScroll = window.pageYOffset;
-                window.scrollBy(0, 1000);
-                var afterScroll = window.pageYOffset;
-                return {success: afterScroll > beforeScroll, before: beforeScroll, after: afterScroll};
-            """
-            result = self.driver.execute_script(script)
-            if result and result.get('success'):
-                self.logger.debug(f'Window scroll SUCCESS: {result.get("before")} -> {result.get("after")}')
-                time.sleep(1)
+                # Scroll to last review multiple ways
+                last_review.evaluate("el => el.scrollIntoView({behavior: 'auto', block: 'end'})")
+                time.sleep(0.5)
+
+                # Try to click on it to focus
+                try:
+                    last_review.click(timeout=1000)
+                except:
+                    pass
+
+                # Press arrow down and page down multiple times
+                for _ in range(10):
+                    self.page.keyboard.press('ArrowDown')
+                    time.sleep(0.1)
+
+                for _ in range(3):
+                    self.page.keyboard.press('PageDown')
+                    time.sleep(0.3)
+
+                self.logger.debug(f'AGGRESSIVE Strategy 4 SUCCESS: Keyboard navigation')
+                time.sleep(2)
                 return True
-            else:
-                self.logger.warning('Window scroll FAILED: Page did not scroll')
-                return False
         except Exception as e:
-            self.logger.error(f'All scroll strategies failed: {e}')
-            return False
+            self.logger.debug(f'AGGRESSIVE Strategy 4 failed: {e}')
+
+        # AGGRESSIVE Strategy 5: Direct scrollTop manipulation on specific Google Maps classes
+        try:
+            script = """
+                () => {
+                    // Target specific Google Maps classes
+                    var selectors = [
+                        'div[role="main"]',
+                        'div.m6QErb',
+                        'div[aria-label*="Reseñas"]',
+                        'div[aria-label*="Reviews"]',
+                        '.section-layout',
+                        '.section-scrollbox'
+                    ];
+
+                    var scrolled = false;
+
+                    for (var s = 0; s < selectors.length; s++) {
+                        var elements = document.querySelectorAll(selectors[s]);
+
+                        for (var i = 0; i < elements.length; i++) {
+                            var elem = elements[i];
+                            var beforeScroll = elem.scrollTop;
+
+                            // Aggressive scroll
+                            elem.scrollTop = elem.scrollTop + 5000;
+
+                            if (elem.scrollTop > beforeScroll) {
+                                scrolled = true;
+                            }
+                        }
+                    }
+
+                    return {success: scrolled, method: 'targeted_classes'};
+                }
+            """
+
+            result = self.page.evaluate(script)
+            if result and result.get('success'):
+                self.logger.debug(f'AGGRESSIVE Strategy 5 SUCCESS: Targeted class scroll')
+                time.sleep(3)
+                return True
+        except Exception as e:
+            self.logger.debug(f'AGGRESSIVE Strategy 5 failed: {e}')
+
+        self.logger.warning('All AGGRESSIVE scroll strategies failed - returning True anyway to continue')
+        # Return True anyway to keep trying in case reviews load passively
+        return True
 
 
     def __get_logger(self):
@@ -594,58 +753,125 @@ class GoogleMapsScraper:
         logger = logging.getLogger('googlemaps-scraper')
         logger.setLevel(logging.DEBUG)
 
-        # crear manejador de consola y establecer el nivel en debug
-        fh = logging.FileHandler('gm-scraper.log')
-        fh.setLevel(logging.DEBUG)
+        # Limpiar handlers existentes para evitar duplicados
+        logger.handlers = []
 
         # crear formateador
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 
-        # agregar formateador a ch
+        # crear manejador de archivo y establecer el nivel en debug
+        fh = logging.FileHandler('gm-scraper.log')
+        fh.setLevel(logging.DEBUG)
         fh.setFormatter(formatter)
-
-        # agregar ch a logger
         logger.addHandler(fh)
+
+        # crear manejador de consola para stdout (para docker logs)
+        import sys
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setLevel(logging.DEBUG)
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
 
         return logger
 
 
     def __get_driver(self, debug=False):
-        options = Options()
+        # Start Xvfb if not in headless mode (for Docker environments)
+        import subprocess
+        import os
+        self.xvfb_process = None
 
-        if not self.debug:
-            options.add_argument("--headless")
-        else:
-            options.add_argument("--window-size=1366,768")
+        if not self.debug and os.environ.get('DISPLAY') is None:
+            # We're in non-headless mode but no display, start Xvfb
+            try:
+                self.xvfb_process = subprocess.Popen(['Xvfb', ':99', '-screen', '0', '1366x768x24', '-ac', '+extension', 'GLX', '+render', '-noreset'])
+                os.environ['DISPLAY'] = ':99'
+                import time
+                time.sleep(2)  # Wait for Xvfb to start
+                self.logger.info('Started Xvfb on display :99')
+            except Exception as e:
+                self.logger.warning(f'Could not start Xvfb: {e}. Proceeding anyway...')
 
-        options.add_argument("--disable-notifications")
-        #options.add_argument("--lang=en-GB")
-        options.add_argument("--accept-lang=es")
+        # Initialize Playwright
+        self.playwright = sync_playwright().start()
 
-        # Opciones necesarias para Docker
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
+        # Launch browser with args to bypass headless detection
+        self.browser = self.playwright.chromium.launch(
+            headless=not self.debug,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-notifications",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-setuid-sandbox",
+                "--disable-infobars",
+                "--window-position=0,0",
+                "--ignore-certifcate-errors",
+                "--ignore-certifcate-errors-spki-list"
+            ]
+        )
 
-        input_driver = webdriver.Chrome(service=Service(), options=options)
+        # Create context with realistic settings to avoid detection
+        self.context = self.browser.new_context(
+            locale='es-ES',
+            viewport={'width': 1366, 'height': 768},
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            # Add more realistic browser properties
+            extra_http_headers={
+                'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+            },
+            java_script_enabled=True,
+            has_touch=False,
+            is_mobile=False,
+            device_scale_factor=1
+        )
 
-         # hacer clic en el botón de aceptar de Google para poder continuar (ya no es necesario)
-         # EC.element_to_be_clickable((By.XPATH, '//span[contains(text(), "Acepto")]')))
-        input_driver.get(GM_WEBPAGE)
+        # Inject scripts to mask automation
+        self.context.add_init_script("""
+            // Overwrite the `plugins` property to use a custom getter
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
 
-        return input_driver
+            // Overwrite the `plugins` property to use a custom getter
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5]
+            });
+
+            // Overwrite the `languages` property to use a custom getter
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['es-ES', 'es', 'en-US', 'en']
+            });
+
+            // Pass the Chrome Test
+            window.chrome = {
+                runtime: {}
+            };
+
+            // Pass the Permissions Test
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) => (
+                parameters.name === 'notifications' ?
+                    Promise.resolve({ state: Notification.permission }) :
+                    originalQuery(parameters)
+            );
+        """)
+
+        # Create page
+        self.page = self.context.new_page()
+
+        # Navigate to Google Maps
+        self.page.goto(GM_WEBPAGE)
+
 
     # clic en el acuerdo de cookies
     def __click_on_cookie_agreement(self):
         try:
-            agree = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, '//span[contains(text(), "Rechazar todo")]')))
-            agree.click()
-
-            # volver a la página principal
-            # self.driver.switch_to_default_content()
-
-            return True
+            agree = self.page.wait_for_selector('text="Rechazar todo"', timeout=10000)
+            if agree:
+                agree.click()
+                return True
         except:
             return False
 
