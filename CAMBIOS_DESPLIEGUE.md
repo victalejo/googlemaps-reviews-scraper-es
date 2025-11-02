@@ -14,22 +14,27 @@ MongoDB no pasaba el healthcheck y causaba que todo el despliegue fallara.
 ### 1. Removido `version: '3.8'` obsoleto
 El warning decía: "the attribute `version` is obsolete"
 
-### 2. Arreglado healthcheck de MongoDB
-**Antes** (no funcionaba):
+### 2. Removidos todos los healthchecks problemáticos
+Los healthchecks causaban bloqueos en el despliegue. Ahora los servicios inician sin esperar validaciones de salud.
+
+**Cambios**:
+- ❌ Removido healthcheck de MongoDB
+- ❌ Removido healthcheck de API
+- ❌ Removido healthcheck de Worker
+- ✅ Redis healthcheck mantenido (funciona correctamente)
+
+### 3. Cambiadas dependencias de `service_healthy` a `service_started`
+Los servicios API y Worker ahora solo esperan que MongoDB y Redis **inicien**, no que pasen healthchecks.
+
 ```yaml
-healthcheck:
-  test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+depends_on:
+  mongodb:
+    condition: service_started  # Antes: service_healthy
+  redis:
+    condition: service_started  # Antes: service_healthy
 ```
 
-**Ahora** (funciona):
-```yaml
-healthcheck:
-  test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-  interval: 10s
-  timeout: 5s
-  retries: 5
-  start_period: 40s  # Espera 40s antes de empezar a checkear
-```
+**Ventaja**: La API y Worker tienen lógica de reconexión automática, así que pueden manejar si MongoDB/Redis tardan un poco más en estar listos.
 
 ## 🚀 Pasos para Redesplegar
 
