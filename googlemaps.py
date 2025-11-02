@@ -168,14 +168,21 @@ class GoogleMapsScraper:
         seen_ids = set()  # Track review IDs we've already seen to avoid duplicates
         scrolls = 0
         max_scrolls = min(MAX_SCROLLS, (max_reviews // 10) + 5)  # Estimate scrolls needed
+        consecutive_empty_scrolls = 0  # Track consecutive scrolls with no new reviews
+        max_consecutive_empty = 3  # Allow up to 3 scrolls with no new reviews before stopping
+
+        self.logger.info(f'Starting review extraction: max_reviews={max_reviews}, max_scrolls={max_scrolls}')
 
         while len(parsed_reviews) < max_reviews and scrolls < max_scrolls:
             # desplazarse para cargar reseñas
-            self.__scroll()
+            scroll_success = self.__scroll()
             scrolls += 1
 
-            # esperar a que se carguen otras reseñas (ajax)
-            time.sleep(3)
+            if not scroll_success:
+                self.logger.warning(f'Scroll {scrolls} did not succeed, but continuing...')
+
+            # esperar a que se carguen otras reseñas (ajax) - increased from 3 to 6 seconds
+            time.sleep(6)
 
             # expandir texto de la reseña
             self.__expand_reviews()
@@ -184,6 +191,8 @@ class GoogleMapsScraper:
             response = BeautifulSoup(self.driver.page_source, 'html.parser')
             # TODO: Sujeto a cambios
             rblock = response.find_all('div', class_='jftiEf fontBodyMedium')
+
+            self.logger.debug(f'Found {len(rblock)} total review elements in DOM after scroll {scrolls}')
 
             # Parse all reviews found so far
             new_reviews_found = 0
@@ -202,16 +211,28 @@ class GoogleMapsScraper:
                             print(r)
 
             print(f"Loaded {len(parsed_reviews)}/{max_reviews} reviews after {scrolls} scrolls (+{new_reviews_found} new)")
+            self.logger.info(f'Scroll {scrolls}: Found {new_reviews_found} new reviews (total: {len(parsed_reviews)}/{max_reviews})')
 
-            # If no new reviews were found, break to avoid infinite loop
+            # Track consecutive scrolls with no new reviews
             if new_reviews_found == 0:
-                print(f"No new reviews found after {scrolls} scrolls, stopping")
-                break
+                consecutive_empty_scrolls += 1
+                self.logger.warning(f'No new reviews found in scroll {scrolls} (consecutive empty: {consecutive_empty_scrolls}/{max_consecutive_empty})')
+
+                # Only stop if we've had multiple consecutive scrolls with no results
+                if consecutive_empty_scrolls >= max_consecutive_empty:
+                    print(f"No new reviews found after {consecutive_empty_scrolls} consecutive scrolls, stopping")
+                    self.logger.warning(f'Stopping: {consecutive_empty_scrolls} consecutive scrolls with no new reviews')
+                    break
+            else:
+                # Reset counter when we find new reviews
+                consecutive_empty_scrolls = 0
 
             # If we have enough reviews, stop scrolling
             if len(parsed_reviews) >= max_reviews:
+                self.logger.info(f'Reached target of {max_reviews} reviews, stopping')
                 break
 
+        self.logger.info(f'Review extraction completed: {len(parsed_reviews)} reviews found after {scrolls} scrolls')
         return parsed_reviews
 
 
@@ -444,51 +465,128 @@ class GoogleMapsScraper:
 
     def __scroll(self):
         # TODO: Sujeto a cambios
-        # Try multiple selector strategies as Google Maps changes CSS classes frequently
-        # More specific selectors for the reviews container
-        selectors = [
-            'div[role="main"]',  # Semantic selector - most reliable
-            'div.m6QErb.DxyBCb.kA9KIf.dS8AEf',  # Original selector with all classes
-            'div.m6QErb.DxyBCb',  # Slightly more generic
-            'div.m6QErb',  # More generic
-            'div[class*="m6QErb"]',  # Contains m6QErb
-            'div.fontBodyMedium'  # Fallback
-        ]
+        # Returns True if scroll was successful, False otherwise
 
-        scrolled = False
-        for selector in selectors:
-            try:
-                scrollable_div = self.driver.find_element(By.CSS_SELECTOR, selector)
-                if scrollable_div:
-                    # Get current scroll position
-                    scroll_before = self.driver.execute_script('return arguments[0].scrollTop', scrollable_div)
+        # Strategy 1: Scroll to last review element to trigger loading more reviews
+        try:
+            # Find all review elements currently in the DOM
+            review_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div.jftiEf.fontBodyMedium')
 
-                    # Scroll to bottom
-                    self.driver.execute_script('arguments[0].scrollTop = arguments[0].scrollHeight', scrollable_div)
+            if review_elements and len(review_elements) > 0:
+                # Scroll to the last review to trigger loading
+                last_review = review_elements[-1]
 
-                    # Small wait for scroll to complete
-                    time.sleep(0.5)
+                # Get scroll position before scrolling
+                script_before = """
+                    var container = document.querySelector('div[role="main"]');
+                    return container ? container.scrollTop : window.pageYOffset;
+                """
+                scroll_before = self.driver.execute_script(script_before)
 
-                    # Verify scroll happened
-                    scroll_after = self.driver.execute_script('return arguments[0].scrollTop', scrollable_div)
+                # Scroll to last element
+                self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'end'});", last_review)
+                time.sleep(1)  # Wait for scroll animation
 
-                    if scroll_after > scroll_before:
-                        self.logger.debug(f'Scrolled successfully with selector: {selector} (from {scroll_before} to {scroll_after})')
-                        scrolled = True
-                        break
-                    else:
-                        self.logger.debug(f'Selector {selector} found but scroll did not move')
-            except Exception as e:
-                continue
+                # Get scroll position after scrolling
+                scroll_after = self.driver.execute_script(script_before)
 
-        # If no scroll worked, try window scroll as last resort
-        if not scrolled:
-            try:
-                self.logger.warning('Could not find scrollable reviews container, trying window scroll')
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                if scroll_after > scroll_before:
+                    self.logger.debug(f'Strategy 1 SUCCESS: Scrolled to last review element (found {len(review_elements)} reviews, scrolled {scroll_before} -> {scroll_after})')
+                    return True
+                else:
+                    self.logger.debug(f'Strategy 1 FAILED: Scroll position did not change ({scroll_before} -> {scroll_after})')
+        except Exception as e:
+            self.logger.debug(f'Strategy 1 failed (scroll to last review): {e}')
+
+        # Strategy 2: Find scrollable div with overflow and scroll it
+        try:
+            # JavaScript to find the scrollable parent
+            script = """
+                // Find the reviews container that has overflow
+                var elements = document.querySelectorAll('div[role="main"], div.m6QErb, div[class*="m6QErb"], div.fontBodyMedium');
+                for (var i = 0; i < elements.length; i++) {
+                    var style = window.getComputedStyle(elements[i]);
+                    var overflow = style.overflowY || style.overflow;
+                    if (overflow === 'auto' || overflow === 'scroll') {
+                        // Found scrollable element, scroll it
+                        var beforeScroll = elements[i].scrollTop;
+                        elements[i].scrollTop = elements[i].scrollHeight;
+                        var afterScroll = elements[i].scrollTop;
+                        if (afterScroll > beforeScroll) {
+                            return {success: true, before: beforeScroll, after: afterScroll, selector: elements[i].className};
+                        }
+                    }
+                }
+                return {success: false};
+            """
+            result = self.driver.execute_script(script)
+
+            if result and result.get('success'):
+                self.logger.debug(f'Strategy 2 SUCCESS: Scrolled from {result.get("before")} to {result.get("after")}')
+                time.sleep(1)
+                return True
+            else:
+                self.logger.debug('Strategy 2 FAILED: No scrollable element with overflow found or scroll did not move')
+        except Exception as e:
+            self.logger.debug(f'Strategy 2 failed (find overflow container): {e}')
+
+        # Strategy 3: Try scrolling the main panel by pixel amount
+        try:
+            script = """
+                var mainPanel = document.querySelector('div[role="main"]');
+                if (mainPanel) {
+                    var beforeScroll = mainPanel.scrollTop;
+                    mainPanel.scrollBy(0, 1000);
+                    var afterScroll = mainPanel.scrollTop;
+                    return {success: afterScroll > beforeScroll, before: beforeScroll, after: afterScroll};
+                }
+                return {success: false};
+            """
+            result = self.driver.execute_script(script)
+            if result and result.get('success'):
+                self.logger.debug(f'Strategy 3 SUCCESS: Scrolled main panel from {result.get("before")} to {result.get("after")}')
+                time.sleep(1)
+                return True
+            else:
+                self.logger.debug('Strategy 3 FAILED: Main panel not found or scroll did not move')
+        except Exception as e:
+            self.logger.debug(f'Strategy 3 failed (scrollBy): {e}')
+
+        # Strategy 4: Try ActionChains for more reliable scrolling
+        try:
+            review_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div.jftiEf.fontBodyMedium')
+            if review_elements and len(review_elements) > 0:
+                # Move to last review and send PAGE_DOWN key
+                actions = ActionChains(self.driver)
+                actions.move_to_element(review_elements[-1]).perform()
                 time.sleep(0.5)
-            except:
-                pass
+                actions.send_keys(Keys.PAGE_DOWN).perform()
+                time.sleep(0.5)
+                self.logger.debug('Strategy 4: Used ActionChains to scroll')
+                return True
+        except Exception as e:
+            self.logger.debug(f'Strategy 4 failed (ActionChains): {e}')
+
+        # Last resort: window scroll
+        try:
+            self.logger.warning('All primary scroll strategies failed, trying window scroll as last resort')
+            script = """
+                var beforeScroll = window.pageYOffset;
+                window.scrollBy(0, 1000);
+                var afterScroll = window.pageYOffset;
+                return {success: afterScroll > beforeScroll, before: beforeScroll, after: afterScroll};
+            """
+            result = self.driver.execute_script(script)
+            if result and result.get('success'):
+                self.logger.debug(f'Window scroll SUCCESS: {result.get("before")} -> {result.get("after")}')
+                time.sleep(1)
+                return True
+            else:
+                self.logger.warning('Window scroll FAILED: Page did not scroll')
+                return False
+        except Exception as e:
+            self.logger.error(f'All scroll strategies failed: {e}')
+            return False
 
 
     def __get_logger(self):

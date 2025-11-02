@@ -10,7 +10,9 @@
       "Bash(docker-compose:*)",
       "Bash(/dev/null)",
       "Bash(curl:*)",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_close"
     ],
     "deny": [],
     "ask": []
