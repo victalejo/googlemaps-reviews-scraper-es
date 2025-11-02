@@ -1,7 +1,7 @@
 services:
   # MongoDB Database
   mongodb:
-    image: mongo:6
+    image: mongo:7
     container_name: googlemaps-mongodb-prod
     restart: unless-stopped
     ports:
