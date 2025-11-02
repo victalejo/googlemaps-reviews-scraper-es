@@ -1,0 +1,118 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:6
+    container_name: googlemaps-mongodb-prod
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=googlemaps
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - googlemaps-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Queue
+  redis:
+    image: redis:7-alpine
+    container_name: googlemaps-redis-prod
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - googlemaps-network
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Application
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: googlemaps-api-prod
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - MONGODB_URL=${MONGODB_URL:-mongodb://mongodb:27017/}
+      - MONGODB_DB=${MONGODB_DB:-googlemaps}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - HEADLESS_MODE=${HEADLESS_MODE:-True}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DEFAULT_CHECK_INTERVAL=${DEFAULT_CHECK_INTERVAL:-60}
+      - DEFAULT_REVIEWS_COUNT=${DEFAULT_REVIEWS_COUNT:-100}
+      - MAX_REVIEWS_PER_REQUEST=${MAX_REVIEWS_PER_REQUEST:-500}
+      - WEBHOOK_MAX_RETRIES=${WEBHOOK_MAX_RETRIES:-3}
+      - WEBHOOK_RETRY_DELAY=${WEBHOOK_RETRY_DELAY:-5}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - googlemaps-network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # RQ Worker (for background scraping tasks)
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: googlemaps-worker-prod
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - SERVICE_TYPE=worker
+      - MONGODB_URL=${MONGODB_URL:-mongodb://mongodb:27017/}
+      - MONGODB_DB=${MONGODB_DB:-googlemaps}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - HEADLESS_MODE=${HEADLESS_MODE:-True}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - googlemaps-network
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "worker.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  googlemaps-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+    driver: local
+  redis_data:
+    driver: local
