@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
+import gc
 import itertools
 import logging
+import os
+import psutil
 import re
 import time
 import traceback
 from datetime import datetime, timedelta
 
-import numpy as np
 import pandas as pd
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext, TimeoutError as PlaywrightTimeout
@@ -263,7 +265,9 @@ class GoogleMapsScraper:
         consecutive_empty_scrolls = 0  # Track consecutive scrolls with no new reviews
         max_consecutive_empty = 3  # Allow up to 3 scrolls with no new reviews before stopping
 
-        self.logger.info(f'Starting review extraction: max_reviews={max_reviews}, max_scrolls={max_scrolls}')
+        # Log initial memory usage
+        initial_memory = self.__get_memory_usage()
+        self.logger.info(f'Starting review extraction: max_reviews={max_reviews}, max_scrolls={max_scrolls}, initial_memory={initial_memory:.2f}MB')
 
         while len(parsed_reviews) < max_reviews and scrolls < max_scrolls:
             # desplazarse para cargar reseñas
@@ -286,14 +290,25 @@ class GoogleMapsScraper:
 
             self.logger.debug(f'Found {len(rblock)} total review elements in DOM after scroll {scrolls}')
 
-            # Parse all reviews found so far
+            # Parse only NEW reviews (optimization: skip parsing already seen reviews)
             new_reviews_found = 0
             for index, review in enumerate(rblock):
                 if index >= offset:
+                    # Quick check: get review ID before full parsing to avoid unnecessary work
+                    try:
+                        review_id = review.get('data-review-id')
+                    except:
+                        review_id = None
+
+                    # Skip parsing if we've already processed this review
+                    if review_id and review_id in seen_ids:
+                        continue
+
+                    # Parse only new reviews
                     r = self.__parse(review)
                     review_id = r.get('id_review')
 
-                    # Skip if we've already seen this review ID
+                    # Add new review if we haven't seen it
                     if review_id and review_id not in seen_ids:
                         if len(parsed_reviews) < max_reviews:
                             parsed_reviews.append(r)
@@ -304,6 +319,17 @@ class GoogleMapsScraper:
 
             print(f"Loaded {len(parsed_reviews)}/{max_reviews} reviews after {scrolls} scrolls (+{new_reviews_found} new)")
             self.logger.info(f'Scroll {scrolls}: Found {new_reviews_found} new reviews (total: {len(parsed_reviews)}/{max_reviews})')
+
+            # Free memory: explicitly delete BeautifulSoup objects to prevent memory leak
+            del response
+            del rblock
+
+            # Force garbage collection every 5 scrolls to free accumulated memory
+            if scrolls % 5 == 0:
+                gc.collect()
+                current_memory = self.__get_memory_usage()
+                memory_increase = current_memory - initial_memory
+                self.logger.info(f'Memory check at scroll {scrolls}: current={current_memory:.2f}MB, increase={memory_increase:.2f}MB (from initial {initial_memory:.2f}MB)')
 
             # Track consecutive scrolls with no new reviews
             if new_reviews_found == 0:
@@ -324,7 +350,11 @@ class GoogleMapsScraper:
                 self.logger.info(f'Reached target of {max_reviews} reviews, stopping')
                 break
 
+        # Log final memory usage
+        final_memory = self.__get_memory_usage()
+        total_memory_increase = final_memory - initial_memory
         self.logger.info(f'Review extraction completed: {len(parsed_reviews)} reviews found after {scrolls} scrolls')
+        self.logger.info(f'Memory usage - Initial: {initial_memory:.2f}MB, Final: {final_memory:.2f}MB, Increase: {total_memory_increase:.2f}MB')
         return parsed_reviews
 
 
@@ -774,6 +804,15 @@ class GoogleMapsScraper:
 
         return logger
 
+    def __get_memory_usage(self):
+        """Get current memory usage in MB"""
+        try:
+            process = psutil.Process(os.getpid())
+            mem_info = process.memory_info()
+            return mem_info.rss / 1024 / 1024  # Convert bytes to MB
+        except Exception as e:
+            self.logger.warning(f'Could not get memory usage: {e}')
+            return 0
 
     def __get_driver(self, debug=False):
         # Start Xvfb if not in headless mode (for Docker environments)

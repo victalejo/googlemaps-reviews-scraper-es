@@ -5,13 +5,13 @@ charset-normalizer==3.3.2
 colorama==0.4.6
 crayons==0.4.0
 idna==3.6
-numpy==1.26.4
 pandas==2.2.0
 pymongo==4.6.3
 pytz==2024.1
 requests==2.32.0
 playwright==1.40.0
 termcolor==2.4.0
+psutil==5.9.8
 
 # FastAPI and web framework
 fastapi==0.115.0

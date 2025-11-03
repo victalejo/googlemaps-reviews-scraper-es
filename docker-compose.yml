@@ -83,6 +83,15 @@ services:
       - redis
     networks:
       - googlemaps-network
+    # Memory limits to prevent OOM kills
+    mem_limit: 2g
+    memswap_limit: 2g
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+        reservations:
+          memory: 512m
 
 networks:
   googlemaps-network:

@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # Scraping Configuration
     default_reviews_count: int = 100
-    scraping_timeout: int = 300  # seconds
+    scraping_timeout: int = 900  # seconds (increased from 300 to handle large scraping jobs)
     headless_mode: bool = True
     chrome_driver_path: Optional[str] = None  # None = auto-detect
 
