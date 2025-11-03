@@ -12,7 +12,10 @@
       "Bash(curl:*)",
       "Bash(test:*)",
       "mcp__playwright__browser_navigate",
-      "mcp__playwright__browser_close"
+      "mcp__playwright__browser_close",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []

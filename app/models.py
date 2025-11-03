@@ -110,12 +110,12 @@ class ReviewInDB(BaseModel):
     place_id: Optional[str] = None  # Optional - only provided when scraping through monitoring
     client_id: Optional[str] = None  # Optional - only provided when scraping through monitoring
     branch_id: Optional[str] = None  # Optional - only provided when scraping through monitoring
-    caption: str
-    relative_date: str
+    caption: Optional[str] = None  # Optional - some reviews may not have text
+    relative_date: Optional[str] = None  # Optional - may fail to extract
     review_date: datetime
     retrieval_date: datetime
-    rating: float
-    username: str
+    rating: Optional[float] = None  # Optional - may fail to extract
+    username: Optional[str] = None  # Optional - may fail to extract
     n_review_user: Optional[int] = None
     n_photo_user: Optional[int] = None
     url_user: Optional[str] = None
@@ -134,12 +134,12 @@ class ReviewResponse(BaseModel):
     place_id: Optional[str] = None
     client_id: Optional[str] = None
     branch_id: Optional[str] = None
-    caption: str
-    relative_date: str
+    caption: Optional[str] = None  # Optional - some reviews may not have text
+    relative_date: Optional[str] = None  # Optional - may fail to extract
     review_date: datetime
     retrieval_date: datetime
-    rating: float
-    username: str
+    rating: Optional[float] = None  # Optional - may fail to extract
+    username: Optional[str] = None  # Optional - may fail to extract
     n_review_user: Optional[int] = None
     n_photo_user: Optional[int] = None
     url_user: Optional[str] = None
