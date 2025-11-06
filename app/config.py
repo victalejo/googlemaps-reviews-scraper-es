@@ -22,7 +22,6 @@ class Settings(BaseSettings):
     # MongoDB
     mongodb_url: str = "mongodb://localhost:27017/"
     mongodb_db: str = "googlemaps"
-    mongodb_places_collection: str = "places"
     mongodb_reviews_collection: str = "reviews"
 
     # Redis
@@ -34,16 +33,6 @@ class Settings(BaseSettings):
     scraping_timeout: int = 900  # seconds (increased from 300 to handle large scraping jobs)
     headless_mode: bool = True
     chrome_driver_path: Optional[str] = None  # None = auto-detect
-
-    # Monitoring Configuration
-    default_check_interval: int = 60  # minutes
-    enable_monitoring_on_startup: bool = True
-    max_concurrent_scrapers: int = 3
-
-    # Webhook Configuration
-    webhook_timeout: int = 10  # seconds
-    webhook_max_retries: int = 3
-    webhook_retry_delay: int = 5  # seconds
 
     # Pagination
     default_page_size: int = 100

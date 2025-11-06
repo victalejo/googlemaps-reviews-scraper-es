@@ -17,11 +17,7 @@ logger = logging.getLogger(__name__)
 def scrape_reviews_task(
     url: str,
     max_reviews: int = 100,
-    sort_by: str = "newest",
-    client_id: Optional[str] = None,
-    branch_id: Optional[str] = None,
-    place_id: Optional[str] = None,
-    save_to_db: bool = True
+    sort_by: str = "newest"
 ) -> Dict[str, Any]:
     """
     RQ task for scraping reviews asynchronously.
@@ -32,10 +28,6 @@ def scrape_reviews_task(
         url: Google Maps URL
         max_reviews: Maximum number of reviews to scrape
         sort_by: Sort option (newest, most_relevant, highest_rating, lowest_rating)
-        client_id: Client ID (optional)
-        branch_id: Branch ID (optional)
-        place_id: Place ID (optional)
-        save_to_db: Whether to save results to MongoDB
 
     Returns:
         Dictionary with results:
@@ -64,11 +56,7 @@ def scrape_reviews_task(
         reviews = scrape_reviews(
             url=url,
             max_reviews=max_reviews,
-            sort_by=sort_by,
-            client_id=client_id,
-            branch_id=branch_id,
-            place_id=place_id,
-            save_to_db=save_to_db
+            sort_by=sort_by
         )
 
         finished_at = datetime.utcnow()

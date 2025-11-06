@@ -45,9 +45,6 @@ async def start_scraping(request: ScrapingRequest):
     - **url**: URL de Google Maps
     - **max_reviews**: Número máximo de reseñas (1-1000)
     - **sort_by**: Criterio de ordenamiento (newest, most_relevant, highest_rating, lowest_rating)
-    - **client_id**: ID del cliente (opcional)
-    - **branch_id**: ID de la sucursal (opcional)
-    - **save_to_db**: Guardar en MongoDB (default: true)
 
     Retorna:
     - **job_id**: ID del trabajo para consultar status/result
@@ -63,9 +60,6 @@ async def start_scraping(request: ScrapingRequest):
             url=request.url,
             max_reviews=request.max_reviews,
             sort_by=request.sort_by.value,
-            client_id=request.client_id,
-            branch_id=request.branch_id,
-            save_to_db=request.save_to_db,
             job_timeout=settings.scraping_timeout,
             result_ttl=3600  # Keep result for 1 hour
         )

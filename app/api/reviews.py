@@ -27,9 +27,6 @@ router = APIRouter()
 async def list_reviews(
     page: int = Query(1, ge=1, description="Número de página (comienza en 1)"),
     page_size: int = Query(100, ge=1, le=500, description="Tamaño de página (máx 500)"),
-    place_id: Optional[str] = Query(None, description="Filtrar por place_id"),
-    client_id: Optional[str] = Query(None, description="Filtrar por client_id"),
-    branch_id: Optional[str] = Query(None, description="Filtrar por branch_id"),
     min_rating: Optional[float] = Query(None, ge=1, le=5, description="Rating mínimo"),
     max_rating: Optional[float] = Query(None, ge=1, le=5, description="Rating máximo"),
     sort_by: str = Query("review_date", description="Campo para ordenar (review_date, rating, retrieval_date)"),
@@ -39,9 +36,6 @@ async def list_reviews(
     Listar reseñas con paginación y filtros.
 
     **Filtros disponibles:**
-    - **place_id**: Filtrar por lugar específico
-    - **client_id**: Filtrar por cliente
-    - **branch_id**: Filtrar por sucursal
     - **min_rating**: Rating mínimo (1-5)
     - **max_rating**: Rating máximo (1-5)
 
@@ -57,13 +51,6 @@ async def list_reviews(
 
     # Build query filter
     query_filter = {}
-
-    if place_id:
-        query_filter["place_id"] = place_id
-    if client_id:
-        query_filter["client_id"] = client_id
-    if branch_id:
-        query_filter["branch_id"] = branch_id
 
     # Rating filters
     if min_rating is not None or max_rating is not None:
@@ -151,102 +138,26 @@ async def get_review(review_id: str):
 
 
 # ============================================================================
-# GET REVIEWS BY PLACE
-# ============================================================================
-
-@router.get("/by-place/{place_id}", response_model=PaginatedReviewsResponse)
-async def get_reviews_by_place(
-    place_id: str,
-    page: int = Query(1, ge=1, description="Número de página"),
-    page_size: int = Query(100, ge=1, le=500, description="Tamaño de página"),
-    min_rating: Optional[float] = Query(None, ge=1, le=5, description="Rating mínimo"),
-    max_rating: Optional[float] = Query(None, ge=1, le=5, description="Rating máximo")
-):
-    """
-    Obtener todas las reseñas de un lugar específico.
-
-    - **place_id**: ID único del lugar
-    - Soporta paginación y filtro por rating
-    - Ordenadas por fecha de reseña (más reciente primero)
-    """
-    collection = get_reviews_collection()
-
-    # Build query filter
-    query_filter = {"place_id": place_id}
-
-    # Rating filters
-    if min_rating is not None or max_rating is not None:
-        query_filter["rating"] = {}
-        if min_rating is not None:
-            query_filter["rating"]["$gte"] = min_rating
-        if max_rating is not None:
-            query_filter["rating"]["$lte"] = max_rating
-
-    try:
-        # Get total count
-        total_count = collection.count_documents(query_filter)
-
-        # Calculate pagination
-        skip = (page - 1) * page_size
-        total_pages = math.ceil(total_count / page_size)
-
-        # Query with pagination (sorted by review_date descending)
-        cursor = collection.find(query_filter).sort("review_date", -1).skip(skip).limit(page_size)
-        reviews_data = list(cursor)
-
-        # Convert to ReviewResponse models
-        reviews = [ReviewResponse(**review) for review in reviews_data]
-
-        logger.info(f"Listed {len(reviews)} reviews for place {place_id} (page {page}/{total_pages})")
-
-        return PaginatedReviewsResponse(
-            total=total_count,
-            page=page,
-            page_size=page_size,
-            total_pages=total_pages,
-            reviews=reviews
-        )
-
-    except Exception as e:
-        logger.error(f"Error listing reviews for place {place_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error al listar reseñas del lugar: {str(e)}"
-        )
-
-
-# ============================================================================
 # GET RECENT REVIEWS
 # ============================================================================
 
 @router.get("/recent/all")
 async def get_recent_reviews(
-    limit: int = Query(100, ge=1, le=500, description="Número de reseñas recientes"),
-    client_id: Optional[str] = Query(None, description="Filtrar por client_id"),
-    branch_id: Optional[str] = Query(None, description="Filtrar por branch_id")
+    limit: int = Query(100, ge=1, le=500, description="Número de reseñas recientes")
 ):
     """
     Obtener las reseñas más recientes del sistema.
 
     - **limit**: Número de reseñas a retornar (max 500)
-    - **client_id**: Filtrar por cliente (opcional)
-    - **branch_id**: Filtrar por sucursal (opcional)
 
     Ordenadas por fecha de extracción (retrieval_date) descendente.
     Útil para monitorear nuevas reseñas en tiempo real.
     """
     collection = get_reviews_collection()
 
-    # Build query filter
-    query_filter = {}
-    if client_id:
-        query_filter["client_id"] = client_id
-    if branch_id:
-        query_filter["branch_id"] = branch_id
-
     try:
         # Query recent reviews
-        cursor = collection.find(query_filter).sort("retrieval_date", -1).limit(limit)
+        cursor = collection.find({}).sort("retrieval_date", -1).limit(limit)
         reviews_data = list(cursor)
 
         # Convert to ReviewResponse models

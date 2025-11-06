@@ -44,12 +44,6 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("All database connections successful")
 
-        # Start monitoring scheduler if enabled
-        if settings.enable_monitoring_on_startup:
-            from app.scheduler import start_scheduler
-            start_scheduler()
-            logger.info("Monitoring scheduler started")
-
     except Exception as e:
         logger.error(f"Error during startup: {e}")
         logger.warning("API will start anyway. Some features may not work until connections are established.")
@@ -61,12 +55,6 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down application...")
 
     try:
-        # Stop monitoring scheduler
-        if settings.enable_monitoring_on_startup:
-            from app.scheduler import stop_scheduler
-            stop_scheduler()
-            logger.info("Monitoring scheduler stopped")
-
         # Close database connections
         close_connections()
 
@@ -80,7 +68,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="API para scraping y monitoreo de reseñas de Google Maps con sistema de webhooks",
+    description="API para scraping de reseñas de Google Maps",
     lifespan=lifespan
 )
 
@@ -130,11 +118,9 @@ async def health_check():
 # INCLUDE ROUTERS
 # ============================================================================
 
-from app.api import places, scraping, reviews, monitor
-app.include_router(places.router, prefix="/api/places", tags=["Places"])
+from app.api import scraping, reviews
 app.include_router(scraping.router, prefix="/api/scraping", tags=["Scraping"])
 app.include_router(reviews.router, prefix="/api/reviews", tags=["Reviews"])
-app.include_router(monitor.router, prefix="/api/monitor", tags=["Monitoring"])
 
 
 # ============================================================================
